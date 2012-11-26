@@ -1,0 +1,33 @@
+name:                fd
+version:             0.1.0.0
+cabal-version:       >= 1.10
+-- synopsis:            
+-- description:         
+license:             BSD3
+license-file:        LICENSE
+author:              Andy Sonnenburg
+maintainer:          Andy Sonnenburg <andy22286@gmail.com>
+copyright:           (c) Andy Sonnenburg 2012
+category:            Control
+homepage:            http://github.com/sonyandy/fd
+bug-reports:         http://github.com/sonyandy/fd/issues
+build-type:          Simple
+
+source-repository head
+  type: git
+  location: git://github.com/sonyandy/fd.git
+
+library
+  default-language: Haskell98
+  exposed-modules:
+    Control.Monad.FD
+  other-modules:
+    Control.Monad.FD.Domain
+  build-depends:
+    base >= 4 && < 5,
+    transformers >= 0.2 && < 0.4,
+    mtl >= 2.0 && < 2.2,
+    containers,
+    hashable,
+    unordered-containers
+  ghc-options: -Wall
