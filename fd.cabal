@@ -22,11 +22,17 @@ library
   exposed-modules:
     Control.Monad.FD
   other-modules:
-    Control.Monad.FD.Domain
+    Control.Monad.FD.DList
+    Control.Monad.FD.Dom
+    Control.Monad.FD.HashMap.Lazy
+    Control.Monad.FD.HashSet
+    Control.Monad.FD.IntSet
+    Control.Monad.FD.Pruning
   build-depends:
     base >= 4 && < 5,
     transformers >= 0.2 && < 0.4,
     mtl >= 2.0 && < 2.2,
+    logict,
     containers,
     hashable,
     unordered-containers
