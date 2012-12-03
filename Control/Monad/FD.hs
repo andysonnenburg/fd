@@ -165,7 +165,7 @@ addPropagator :: Monad m =>
                  Flag s ->
                  FDT s m ()
 addPropagator x r monotoneVars antimonotoneVars entailed = do
-  propagator <- newPropagator x r PropagatorS { monotoneVars, antimonotoneVars }
+  propagator <- newPropagator PropagatorS { monotoneVars, antimonotoneVars }
   HashSet.forM_ monotoneVars $ \ x' ->
     addListener x' $ \ pruning ->
       when (Pruning.member Pruning.val pruning) $
@@ -312,27 +312,18 @@ initVarS = VarS { domain = Dom.full
                 , listeners = mempty
                 }
 
-data Propagator (s :: Region) =
-  Propagator { var :: Var s
-             , range :: Range s
-             , propagatorS :: Integer
-             }
-
-instance Eq (Propagator s) where
-  (==) = (==) `on` propagatorS
-  (/=) = (/=) `on` propagatorS
+newtype Propagator (s :: Region) =
+  Propagator { unwrapPropagator :: Integer
+             } deriving Eq
 
 instance Hashable (Propagator s) where
-  hash = hash . propagatorS
-  hashWithSalt salt = hashWithSalt salt . propagatorS
+  hash = hash . unwrapPropagator
+  hashWithSalt salt = hashWithSalt salt . unwrapPropagator
 
-newPropagator :: Monad m =>
-                 Var s -> Range s ->
-                 PropagatorS s ->
-                 FDT s m (Propagator s)
-newPropagator var range propagatorS = do
+newPropagator :: Monad m => PropagatorS s -> FDT s m (Propagator s)
+newPropagator propagatorS = do
   s@S {..} <- get
-  let propagator = Propagator { var, range, propagatorS = propagatorCount }
+  let propagator = Propagator propagatorCount
   put s { propagatorCount = propagatorCount + 1
         , propagatorMap = HashMap.insert propagator propagatorS propagatorMap
         }
