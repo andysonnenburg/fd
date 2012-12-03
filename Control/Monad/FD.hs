@@ -68,9 +68,13 @@ runFDT m = observeAllT . flip evalStateT initS $ unFDT m
 instance Functor m => Functor (FDT s m) where
   fmap f = FDT . fmap f . unFDT
 
-instance (Functor m, Monad m) => Applicative (FDT s m) where
+instance Applicative m => Applicative (FDT s m) where
   pure = FDT . pure
   f <*> a = FDT $ unFDT f <*> unFDT a
+
+instance Applicative m => Alternative (FDT s m) where
+  empty = FDT empty
+  m <|> n = FDT $ unFDT m <|> unFDT n
 
 instance Monad m => Monad (FDT s m) where
   return = FDT . return
