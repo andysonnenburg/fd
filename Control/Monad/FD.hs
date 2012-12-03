@@ -198,10 +198,12 @@ in' = In
 label :: Monad m => Var s -> FDT s m Int
 label x = do
   d <- readDomain x
-  msum $ for (Dom.toList d) $ \ i -> do
-    writeDomain x $ Dom.singleton i
-    firePruning x Pruning.val
-    return i
+  case Dom.toList d of
+    [i] -> return i
+    is ->  msum $ for is $ \ i -> do
+      writeDomain x $ Dom.singleton i
+      firePruning x Pruning.val
+      return i
 
 type ConditionalVars s = (HashSet (Var s), HashSet (Var s))
 
