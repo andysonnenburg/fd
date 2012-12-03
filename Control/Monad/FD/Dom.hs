@@ -25,7 +25,7 @@ import qualified Control.Monad.FD.Pruning as Pruning
 
 data Dom
   = Bounds Int Int
-  | IntSet IntSet deriving Show
+  | IntSet IntSet
 
 fromBounds :: Int -> Int -> Dom
 fromBounds = Bounds

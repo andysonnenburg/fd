@@ -12,7 +12,8 @@ module Control.Monad.FD
        , runFDT
        , Var
        , freshVar
-       , Term ((:+), (:-), (:*), Int)
+       , Term ((:+), (:-), (:*))
+       , int
        , min
        , max
        , Range ((:..))
@@ -85,7 +86,7 @@ instance MonadTrans (FDT s) where
 instance MonadIO m => MonadIO (FDT s m) where
   liftIO = lift . liftIO
 
-newtype Var (s :: Region) = Var { unwrapVar :: Integer } deriving (Eq, Show)
+newtype Var (s :: Region) = Var { unwrapVar :: Integer } deriving Eq
 
 instance Hashable (Var s) where
   hash = hash . unwrapVar
@@ -103,12 +104,15 @@ freshVar = do
 infixl 6 :+, :-
 infixl 7 :*
 data Term s
-  = Int Int
-  | Term s :+ Term s
+  = Term s :+ Term s
   | Term s :- Term s
   | Int :* Term s
+  | Int Int
   | Min (Var s)
-  | Max (Var s) deriving Show
+  | Max (Var s)
+
+int :: Int -> Term s
+int = Int
 
 min :: Var s -> Term s
 min = Min
@@ -121,7 +125,7 @@ data Range s
   = Term s :.. Term s
   | From (Term s)
   | To (Term s)
-  | Dom (Var s) deriving Show
+  | Dom (Var s)
 
 from :: Term s -> Range s
 from = From
@@ -295,7 +299,7 @@ data Propagator (s :: Region) =
   Propagator { var :: Var s
              , range :: Range s
              , propagatorS :: Integer
-             } deriving Show
+             }
 
 instance Eq (Propagator s) where
   (==) = (==) `on` propagatorS
@@ -318,7 +322,7 @@ data PropagatorS s =
   PropagatorS { monotoneVars :: MonotoneVars s
               , antimonotoneVars :: AntimonotoneVars s
               , entailed :: Bool
-              } deriving Show
+              }
 
 type MonotoneVars s = HashSet (Var s)
 type AntimonotoneVars s = HashSet (Var s)

@@ -9,7 +9,7 @@ data Pruning
   | Min
   | Max
   | MinMax
-  | Val deriving (Eq, Show)
+  | Val deriving Eq
 
 member :: Pruning -> Pruning -> Bool
 member x xs = join x xs == x
