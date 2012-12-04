@@ -12,7 +12,7 @@ module Control.Monad.FD
        , runFDT
        , Var
        , freshVar
-       , Term ((:+), (:-), (:*))
+       , Term ((:+), (:-), (:*), Quot, Div)
        , int
        , min
        , max
@@ -107,11 +107,13 @@ freshVar = do
   return x
 
 infixl 6 :+, :-
-infixl 7 :*
+infixl 7 :*, `Quot`, `Div`
 data Term s
   = Term s :+ Term s
   | Term s :- Term s
   | Int :* Term s
+  | Term s `Quot` Int
+  | Term s `Div` Int
   | Int Int
   | Min (Var s)
   | Max (Var s)
@@ -219,6 +221,12 @@ getConditionalTermVars t = case t of
   x :* t'
     | x >= 0 -> getConditionalTermVars t'
     | otherwise -> liftM swap $ getConditionalTermVars t'
+  t' `Quot` x
+    | x >= 0 -> getConditionalTermVars t'
+    | otherwise -> liftM swap $ getConditionalTermVars t'
+  t' `Div` x
+    | x >= 0 -> getConditionalTermVars t'
+    | otherwise -> liftM swap $ getConditionalTermVars t'
   Min x -> do
     determined <- isDetermined x
     return (if determined then mempty else HashSet.singleton x, mempty)
@@ -249,6 +257,8 @@ termVars t = case t of
   t1 :+ t2 -> (HashMap.unionWith Pruning.join `on` termVars) t1 t2
   t1 :- t2 -> (HashMap.unionWith Pruning.join `on` termVars) t1 t2
   _ :* t' -> termVars t'
+  t' `Quot` _ -> termVars t'
+  t' `Div` _ -> termVars t'
   Min x -> HashMap.singleton x Pruning.min
   Max x -> HashMap.singleton x Pruning.max
 
@@ -282,6 +292,10 @@ getVal t = case t of
   t1 :+ t2 -> liftM2 (+!) (getVal t1) (getVal t2)
   t1 :- t2 -> liftM2 (-!) (getVal t1) (getVal t2)
   x :* t' -> liftM (x *!) $ getVal t'
+  _ `Quot` 0 -> mzero
+  t' `Quot` x -> liftM (`quot` x) $ getVal t'
+  _ `Div` 0 -> mzero
+  t' `Div` x -> liftM (`div` x) $ getVal t'
   Min x -> liftM Dom.findMin $ readDomain x
   Max x -> liftM Dom.findMax $ readDomain x
 
