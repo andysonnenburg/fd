@@ -38,11 +38,9 @@ I# i +! I# j =
 #else
 a +! b =
   case toInteger a + toInteger b of
-    r -> if r < toInteger (minBound :: Int)
-         then minBound
-         else if r > toInteger (maxBound :: Int)
-              then maxBound
-              else fromInteger r
+    r | r < toInteger (minBound :: Int) -> minBound
+      | r > toInteger (maxBound :: Int) -> maxBound
+      | otherwise -> fromInteger r
 #endif
 
 infixl 6 -!
@@ -60,11 +58,9 @@ I# a -! I# b =
 #else
 a -! b =
   case toInteger a - toInteger b of
-    r -> if r < toInteger (minBound :: Int)
-         then minBound
-         else if r > toInteger (maxBound :: Int)
-              then maxBound
-              else fromInteger r
+    r | r < toInteger (minBound :: Int) -> minBound
+      | r > toInteger (maxBound :: Int) -> maxBound
+      | otherwise -> fromInteger r
 #endif
 
 infixl 7 *!
@@ -101,9 +97,7 @@ a@(I# i) *! b@(I# j) =
 #else
 a *! b =
   case toInteger a * toInteger b of
-    r -> if r < toInteger (minBound :: Int)
-         then minBound
-         else if r > toInteger (maxBound :: Int)
-              then maxBound
-              else fromInteger r
+    r | r < toInteger (minBound :: Int) -> minBound
+      | r > toInteger (maxBound :: Int) -> maxBound
+      | otherwise -> fromInteger r
 #endif

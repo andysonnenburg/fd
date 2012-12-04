@@ -1,5 +1,5 @@
 module Control.Monad.FD.Pruning
-       ( Pruning, member, join, dom, min, max, val
+       ( Pruning, join, dom, min, max, val
        ) where
 
 import Prelude hiding (max, min)
@@ -10,9 +10,6 @@ data Pruning
   | Max
   | MinMax
   | Val deriving Eq
-
-member :: Pruning -> Pruning -> Bool
-member x xs = join x xs == x
 
 join :: Pruning -> Pruning -> Pruning
 join Val _ = Val

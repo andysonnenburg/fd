@@ -150,10 +150,10 @@ x `in'` r = do
       when (HashSet.null m && Dom.null d)
         mzero
       addPropagator x r m a
-      when (HashSet.null m) $ do
+      when (HashSet.null m) $
         writeDomain x d
       firePruning x pruning
-    Nothing -> do
+    Nothing ->
       unless (HashSet.null a) $
         addPropagator x r m a
 
@@ -168,15 +168,15 @@ addPropagator x r monotoneVars antimonotoneVars = do
                                           }
   HashSet.forM_ monotoneVars $ \ x' ->
     addListener x' $ \ pruning ->
-      when (Pruning.member Pruning.val pruning) $
+      when (Pruning.val `affectedBy` pruning) $
         modifyMonotoneVars propagator $ HashSet.delete x'
   HashSet.forM_ antimonotoneVars $ \ x' ->
     addListener x' $ \ pruning ->
-      when (Pruning.member Pruning.val pruning) $
+      when (Pruning.val `affectedBy` pruning) $
         modifyAntimonotoneVars propagator $ HashSet.delete x'
   HashMap.forWithKeyM_ (rangeVars r) $ \ x' expectedPruning ->
     addListener x' $ \ actualPruning ->
-      when (Pruning.member actualPruning expectedPruning) $
+      when (expectedPruning `affectedBy` actualPruning) $
         unlessEntailed propagator $
           readDomain x >>= pruneDom r >>= \ pruned -> case pruned of
             Just (d, pruning) ->
@@ -189,12 +189,15 @@ addPropagator x r monotoneVars antimonotoneVars = do
               whenAntimonotone propagator $
                 markEntailed propagator
 
+affectedBy :: Pruning -> Pruning -> Bool
+a `affectedBy` b = Pruning.join a b == b
+
 label :: Monad m => Var s -> FDT s m Int
 label x = do
   d <- readDomain x
   case Dom.toList d of
     [i] -> return i
-    is ->  msum $ for is $ \ i -> do
+    is -> msum $ for is $ \ i -> do
       writeDomain x $ Dom.singleton i
       firePruning x Pruning.val
       return i
@@ -216,10 +219,12 @@ getConditionalTermVars t = case t of
   x :* t'
     | x >= 0 -> getConditionalTermVars t'
     | otherwise -> liftM swap $ getConditionalTermVars t'
-  Min x ->
-    return (HashSet.singleton x, mempty)
-  Max x ->
-    return (mempty, HashSet.singleton x)
+  Min x -> do
+    determined <- isDetermined x
+    return (if determined then mempty else HashSet.singleton x, mempty)
+  Max x -> do
+    determined <- isDetermined x
+    return (mempty, if determined then mempty else HashSet.singleton x)
 
 getConditionalRangeVars :: Monad m => Range s -> FDT s m (ConditionalVars s)
 getConditionalRangeVars r = case r of
@@ -232,8 +237,11 @@ getConditionalRangeVars r = case r of
   To t ->
     getConditionalTermVars t
   Dom x -> do
-    determined <- liftM (Dom.sizeLE 1) $ readDomain x
+    determined <- isDetermined x
     return (mempty, if determined then mempty else HashSet.singleton x)
+
+isDetermined :: Monad m => Var s -> FDT s m Bool
+isDetermined = liftM (Dom.sizeLE 1) . readDomain
 
 termVars :: Term s -> HashMap (Var s) Pruning
 termVars t = case t of
