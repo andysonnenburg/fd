@@ -17,6 +17,8 @@ source-repository head
   type: git
   location: git://github.com/sonyandy/fd.git
 
+flag integer-gmp
+
 library
   default-language: Haskell98
   exposed-modules:
@@ -26,7 +28,7 @@ library
     Control.Monad.FD.Dom
     Control.Monad.FD.HashMap.Lazy
     Control.Monad.FD.HashSet
-    Control.Monad.FD.IntSet
+    Control.Monad.FD.Int
     Control.Monad.FD.Pruning
   build-depends:
     base >= 4 && < 5,
@@ -36,4 +38,9 @@ library
     containers,
     hashable,
     unordered-containers
+  if impl(ghc)
+    other-extensions: MagicHash, UnboxedTuples
+  if flag(integer-gmp)
+    build-depends: integer-gmp
+    cpp-options: -DPACKAGE_integer_gmp
   ghc-options: -Wall

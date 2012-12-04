@@ -20,8 +20,6 @@ module Control.Monad.FD
        , from
        , to
        , dom
-       , tell
-       , Indexical
        , in'
        , label
        ) where
@@ -50,6 +48,7 @@ import Control.Monad.FD.HashMap.Lazy (HashMap, (!))
 import qualified Control.Monad.FD.HashMap.Lazy as HashMap
 import Control.Monad.FD.HashSet (HashSet)
 import qualified Control.Monad.FD.HashSet as HashSet
+import Control.Monad.FD.Int
 import Control.Monad.FD.Pruning (Pruning)
 import qualified Control.Monad.FD.Pruning as Pruning
 
@@ -142,30 +141,31 @@ to = To
 dom :: Var s -> Range s
 dom = Dom
 
-tell :: Monad m => [Indexical s] -> FDT s m ()
-tell is = do
-  entailed <- newFlag
-  forM_ is $ \ (x `In` r) -> do
-    (m, a) <- getConditionalRangeVars r
-    readDomain x >>= pruneDom r >>= \ pruned -> case pruned of
-      Just (d, pruning) -> do
-        when (HashSet.null m && Dom.null d)
-          mzero
-        addPropagator x r m a entailed
-        when (HashSet.null m) $ do
-          writeDomain x d
-          firePruning x pruning
-      Nothing ->
-        unless (HashSet.null a) $
-          addPropagator x r m a entailed
+infixr 1 `in'`
+in' :: Monad m => Var s -> Range s -> FDT s m ()
+x `in'` r = do
+  (m, a) <- getConditionalRangeVars r
+  readDomain x >>= pruneDom r >>= \ pruned -> case pruned of
+    Just (d, pruning) -> do
+      when (HashSet.null m && Dom.null d)
+        mzero
+      addPropagator x r m a
+      when (HashSet.null m) $ do
+        writeDomain x d
+      firePruning x pruning
+    Nothing -> do
+      unless (HashSet.null a) $
+        addPropagator x r m a
 
 addPropagator :: Monad m =>
                  Var s -> Range s ->
                  MonotoneVars s -> AntimonotoneVars s ->
-                 Flag s ->
                  FDT s m ()
-addPropagator x r monotoneVars antimonotoneVars entailed = do
-  propagator <- newPropagator PropagatorS { monotoneVars, antimonotoneVars }
+addPropagator x r monotoneVars antimonotoneVars = do
+  propagator <- newPropagator PropagatorS { monotoneVars
+                                          , antimonotoneVars
+                                          , entailed = False
+                                          }
   HashSet.forM_ monotoneVars $ \ x' ->
     addListener x' $ \ pruning ->
       when (Pruning.member Pruning.val pruning) $
@@ -177,7 +177,7 @@ addPropagator x r monotoneVars antimonotoneVars entailed = do
   HashMap.forWithKeyM_ (rangeVars r) $ \ x' expectedPruning ->
     addListener x' $ \ actualPruning ->
       when (Pruning.member actualPruning expectedPruning) $
-        unlessMarked entailed $
+        unlessEntailed propagator $
           readDomain x >>= pruneDom r >>= \ pruned -> case pruned of
             Just (d, pruning) ->
               whenMonotone propagator $ do
@@ -187,13 +187,7 @@ addPropagator x r monotoneVars antimonotoneVars entailed = do
                 firePruning x pruning
             Nothing ->
               whenAntimonotone propagator $
-                mark entailed
-
-data Indexical s = Var s `In` Range s
-
-infixr 1 `in'`
-in' :: Var s -> Range s -> Indexical s
-in' = In
+                markEntailed propagator
 
 label :: Monad m => Var s -> FDT s m Int
 label x = do
@@ -277,9 +271,9 @@ pruneDom (Dom x) d =
 getVal :: Monad m => Term s -> FDT s m Int
 getVal t = case t of
   Int i -> return i
-  t1 :+ t2 -> liftM2 (+) (getVal t1) (getVal t2)
-  t1 :- t2 -> liftM2 (-) (getVal t1) (getVal t2)
-  x :* t' -> liftM (x *) $ getVal t'
+  t1 :+ t2 -> liftM2 (+!) (getVal t1) (getVal t2)
+  t1 :- t2 -> liftM2 (-!) (getVal t1) (getVal t2)
+  x :* t' -> liftM (x *!) $ getVal t'
   Min x -> liftM Dom.findMin $ readDomain x
   Max x -> liftM Dom.findMax $ readDomain x
 
@@ -334,6 +328,7 @@ newPropagator propagatorS = do
 data PropagatorS s =
   PropagatorS { monotoneVars :: MonotoneVars s
               , antimonotoneVars :: AntimonotoneVars s
+              , entailed :: Bool
               }
 
 type MonotoneVars s = HashSet (Var s)
@@ -379,24 +374,15 @@ modifyAntimonotoneVars :: Monad m =>
 modifyAntimonotoneVars x f = modifyPropagator x $ \ s@PropagatorS {..} ->
   s { antimonotoneVars = f antimonotoneVars }
 
-newtype Flag (s :: Region) = Flag { unwrapFlag :: Integer }
+unlessEntailed :: Monad m => Propagator s -> FDT s m () -> FDT s m ()
+unlessEntailed propagator m = isEntailed propagator >>= flip when m . not
 
-newFlag :: Monad m => FDT s m (Flag s)
-newFlag = do
-  s@S {..} <- get
-  put s { flagCount = flagCount + 1
-        , flagSet = HashSet.insert flagCount flagSet
-        }
-  return $ Flag flagCount
+isEntailed :: Monad m => Propagator s -> FDT s m Bool
+isEntailed = liftM entailed . readPropagator
 
-unlessMarked :: Monad m => Flag s -> FDT s m () -> FDT s m ()
-unlessMarked flag m = do
-  S {..} <- get
-  when (HashSet.member (unwrapFlag flag) flagSet) m
-
-mark :: Monad m => Flag s -> FDT s m ()
-mark flag = modify $ \ s@S {..} ->
-  s { flagSet = HashSet.delete (unwrapFlag flag) flagSet }
+markEntailed :: Monad m => Propagator s -> FDT s m ()
+markEntailed propagator = modifyPropagator propagator $ \ s ->
+  s { entailed = True }
 
 data Region
 
@@ -404,8 +390,6 @@ data S s m = S { varCount :: Integer
                , varMap :: HashMap (Var s) (VarS s m)
                , propagatorCount :: Integer
                , propagatorMap :: HashMap (Propagator s) (PropagatorS s)
-               , flagCount :: Integer
-               , flagSet :: HashSet Integer
                }
 
 initS :: Monad m => S s m
@@ -413,8 +397,6 @@ initS = S { varCount = toInteger (minBound :: Int)
           , varMap = HashMap.empty
           , propagatorCount = toInteger (minBound :: Int)
           , propagatorMap = HashMap.empty
-          , flagCount = toInteger (minBound :: Int)
-          , flagSet = mempty
           }
 
 get :: Monad m => FDT s m (S s m)
