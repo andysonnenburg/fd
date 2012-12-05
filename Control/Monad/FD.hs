@@ -12,29 +12,30 @@ module Control.Monad.FD
        , runFDT
        , Var
        , freshVar
-       , Term ((:+), (:-), (:*), Quot, Div)
-       , int
-       , min
-       , max
-       , Range ((:..))
-       , from
-       , to
-       , dom
-       , in'
+       , Term (..)
+       , Range (..)
+       , Indexical (..)
+       , tell
        , label
        ) where
 
 import Control.Applicative
-import Control.Monad
+import Control.Monad (MonadPlus (mplus, mzero),
+                      liftM, liftM2,
+                      msum,
+                      unless, when)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Logic (LogicT, observeAllT)
 import Control.Monad.State (StateT, evalStateT)
 import qualified Control.Monad.State as State
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
+import Data.Foldable (forM_, toList)
 import Data.Function (on)
 import Data.Functor.Identity
 import Data.Hashable
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as HashSet
 import Data.Monoid
 import Data.Tuple (swap)
 
@@ -46,8 +47,6 @@ import Control.Monad.FD.Dom (Dom)
 import qualified Control.Monad.FD.Dom as Dom
 import Control.Monad.FD.HashMap.Lazy (HashMap, (!))
 import qualified Control.Monad.FD.HashMap.Lazy as HashMap
-import Control.Monad.FD.HashSet (HashSet)
-import qualified Control.Monad.FD.HashSet as HashSet
 import Control.Monad.FD.Int
 import Control.Monad.FD.Pruning (Pruning)
 import qualified Control.Monad.FD.Pruning as Pruning
@@ -118,78 +117,64 @@ data Term s
   | Min (Var s)
   | Max (Var s)
 
-int :: Int -> Term s
-int = Int
-
-min :: Var s -> Term s
-min = Min
-
-max :: Var s -> Term s
-max = Max
-
 infix 5 :..
 data Range s
   = Term s :.. Term s
-  | From (Term s)
-  | To (Term s)
   | Dom (Var s)
 
-from :: Term s -> Range s
-from = From
+infixr 1 `In`
+data Indexical s = Var s `In` Range s
 
-to :: Term s -> Range s
-to = To
-
-dom :: Var s -> Range s
-dom = Dom
-
-infixr 1 `in'`
-in' :: Monad m => Var s -> Range s -> FDT s m ()
-x `in'` r = do
-  (m, a) <- getConditionalRangeVars r
-  readDomain x >>= pruneDom r >>= \ pruned -> case pruned of
-    Just (d, pruning) -> do
-      when (HashSet.null m && Dom.null d)
-        mzero
-      addPropagator x r m a
-      when (HashSet.null m) $
-        writeDomain x d
-      firePruning x pruning
-    Nothing ->
-      unless (HashSet.null a) $
-        addPropagator x r m a
+tell :: Monad m => [Indexical s] -> FDT s m ()
+tell is = do
+  entailed <- newFlag
+  forM_ is $ \ (x `In` r) -> do
+    (m, a) <- getConditionalRangeVars r
+    readDomain x >>= pruneDom r >>= \ pruned -> case pruned of
+      Just (d, pruning) -> do
+        when (HashSet.null m && Dom.null d)
+          mzero
+        addPropagator x r m a entailed
+        when (HashSet.null m) $
+          writeDomain x d
+        dispatchPruning x pruning
+      Nothing ->
+        unless (HashSet.null a) $
+          addPropagator x r m a entailed
 
 addPropagator :: Monad m =>
                  Var s -> Range s ->
                  MonotoneVars s -> AntimonotoneVars s ->
+                 Flag s ->
                  FDT s m ()
-addPropagator x r monotoneVars antimonotoneVars = do
+addPropagator x r monotoneVars antimonotoneVars entailed = do
   propagator <- newPropagator PropagatorS { monotoneVars
                                           , antimonotoneVars
-                                          , entailed = False
                                           }
-  HashSet.forM_ monotoneVars $ \ x' ->
+  forM_ monotoneVars $ \ x' ->
     addListener x' $ \ pruning ->
       when (Pruning.val `affectedBy` pruning) $
         modifyMonotoneVars propagator $ HashSet.delete x'
-  HashSet.forM_ antimonotoneVars $ \ x' ->
+  forM_ antimonotoneVars $ \ x' ->
     addListener x' $ \ pruning ->
       when (Pruning.val `affectedBy` pruning) $
         modifyAntimonotoneVars propagator $ HashSet.delete x'
   HashMap.forWithKeyM_ (rangeVars r) $ \ x' expectedPruning ->
     addListener x' $ \ actualPruning ->
       when (expectedPruning `affectedBy` actualPruning) $
-        unlessEntailed propagator $
-          readDomain x >>= pruneDom r >>= \ pruned -> case pruned of
-            Just (d, pruning) ->
-              whenMonotone propagator $ do
-                when (Dom.null d)
-                  mzero
-                writeDomain x d
-                firePruning x pruning
-            Nothing ->
-              whenAntimonotone propagator $
-                markEntailed propagator
+        unlessMarked entailed $
+          readDomain x >>= pruneDom r >>= \ pruned -> do
+            PropagatorS m a <- readPropagator propagator
+            case pruned of
+              Just (d, pruning) ->
+                when (HashSet.null m) $ do
+                  when (Dom.null d)
+                    mzero
+                  writeDomain x d
+                  dispatchPruning x pruning
+              Nothing ->
+                when (HashSet.null a) $
+                  mark entailed
 
 affectedBy :: Pruning -> Pruning -> Bool
 a `affectedBy` b = Pruning.join a b == b
@@ -201,7 +186,7 @@ label x = do
     [i] -> return i
     is -> msum $ for is $ \ i -> do
       writeDomain x $ Dom.singleton i
-      firePruning x Pruning.val
+      dispatchPruning x Pruning.val
       return i
 
 type ConditionalVars s = (HashSet (Var s), HashSet (Var s))
@@ -240,10 +225,6 @@ getConditionalRangeVars r = case r of
     (s1, g1) <- getConditionalTermVars t1
     (s2, g2) <- getConditionalTermVars t2
     return (g1 <> s2, s1 <> g2)
-  From t ->
-    liftM swap $ getConditionalTermVars t
-  To t ->
-    getConditionalTermVars t
   Dom x -> do
     determined <- isDetermined x
     return (mempty, if determined then mempty else HashSet.singleton x)
@@ -265,24 +246,16 @@ termVars t = case t of
 rangeVars :: Range s -> HashMap (Var s) Pruning
 rangeVars r = case r of
   t1 :.. t2 -> (HashMap.unionWith Pruning.join `on` termVars) t1 t2
-  From t -> termVars t
-  To t -> termVars t
   Dom x -> HashMap.singleton x Pruning.dom
 
-firePruning :: Monad m => Var s -> Pruning -> FDT s m ()
-firePruning x pruning = readListeners x >>= mapM_ ($ pruning) . DList.toList
+dispatchPruning :: Monad m => Var s -> Pruning -> FDT s m ()
+dispatchPruning x pruning = readListeners x >>= mapM_ ($ pruning) . toList
 
 pruneDom :: Monad m => Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 pruneDom (t1 :.. t2) d = do
   i1 <- getVal t1
   i2 <- getVal t2
   return $ Dom.intersection d (Dom.fromBounds i1 i2)
-pruneDom (From t) d = do
-   i <- getVal t
-   return $ Dom.deleteLT i d
-pruneDom (To t) d = do
-  i <- getVal t
-  return $ Dom.deleteGT i d
 pruneDom (Dom x) d =
   liftM (Dom.intersection d) $ readDomain x
 
@@ -350,7 +323,6 @@ newPropagator propagatorS = do
 data PropagatorS s =
   PropagatorS { monotoneVars :: MonotoneVars s
               , antimonotoneVars :: AntimonotoneVars s
-              , entailed :: Bool
               }
 
 type MonotoneVars s = HashSet (Var s)
@@ -366,28 +338,12 @@ modifyPropagator :: Monad m =>
 modifyPropagator x f = modify $ \ s@S {..} ->
   s { propagatorMap = HashMap.adjust f x propagatorMap }
 
-whenMonotone :: Monad m => Propagator s -> FDT s m () -> FDT s m ()
-whenMonotone propagator m = do
-  monotone <- liftM HashSet.null $ readMonotoneVars propagator
-  when monotone m
-
-readMonotoneVars :: Monad m => Propagator s -> FDT s m (AntimonotoneVars s)
-readMonotoneVars = liftM monotoneVars . readPropagator
-
 modifyMonotoneVars :: Monad m =>
                       Propagator s ->
                       (MonotoneVars s -> MonotoneVars s) ->
                       FDT s m ()
 modifyMonotoneVars x f = modifyPropagator x $ \ s@PropagatorS {..} ->
   s { monotoneVars = f monotoneVars }
-
-whenAntimonotone :: Monad m => Propagator s -> FDT s m () -> FDT s m ()
-whenAntimonotone propagator m = do
-  antimonotone <- liftM HashSet.null $ readAntimonotoneVars propagator
-  when antimonotone m
-
-readAntimonotoneVars :: Monad m => Propagator s -> FDT s m (AntimonotoneVars s)
-readAntimonotoneVars = liftM antimonotoneVars . readPropagator
 
 modifyAntimonotoneVars :: Monad m =>
                           Propagator s ->
@@ -396,15 +352,28 @@ modifyAntimonotoneVars :: Monad m =>
 modifyAntimonotoneVars x f = modifyPropagator x $ \ s@PropagatorS {..} ->
   s { antimonotoneVars = f antimonotoneVars }
 
-unlessEntailed :: Monad m => Propagator s -> FDT s m () -> FDT s m ()
-unlessEntailed propagator m = isEntailed propagator >>= flip when m . not
+newtype Flag (s :: Region) = Flag { unwrapFlag :: Integer } deriving Eq
 
-isEntailed :: Monad m => Propagator s -> FDT s m Bool
-isEntailed = liftM entailed . readPropagator
+instance Hashable (Flag s) where
+  hash = hash . unwrapFlag
+  hashWithSalt salt = hashWithSalt salt . unwrapFlag
 
-markEntailed :: Monad m => Propagator s -> FDT s m ()
-markEntailed propagator = modifyPropagator propagator $ \ s ->
-  s { entailed = True }
+newFlag :: Monad m => FDT s m (Flag s)
+newFlag = do
+  s@S {..} <- get
+  let flag = Flag flagCount
+  put s { flagCount = flagCount + 1
+        , flagSet = HashSet.insert flag flagSet
+        }
+  return flag
+
+unlessMarked :: Monad m => Flag s -> FDT s m () -> FDT s m ()
+unlessMarked flag m = do
+  unmarked <- liftM (HashSet.member flag) (gets flagSet)
+  when unmarked m
+
+mark :: Monad m => Flag s -> FDT s m ()
+mark flag = modify $ \ s@S {..} -> s { flagSet = HashSet.delete flag flagSet }
 
 data Region
 
@@ -412,13 +381,17 @@ data S s m = S { varCount :: Integer
                , varMap :: HashMap (Var s) (VarS s m)
                , propagatorCount :: Integer
                , propagatorMap :: HashMap (Propagator s) (PropagatorS s)
+               , flagCount :: Integer
+               , flagSet :: HashSet (Flag s)
                }
 
 initS :: Monad m => S s m
 initS = S { varCount = toInteger (minBound :: Int)
-          , varMap = HashMap.empty
+          , varMap = mempty
           , propagatorCount = toInteger (minBound :: Int)
-          , propagatorMap = HashMap.empty
+          , propagatorMap = mempty
+          , flagCount = toInteger (minBound :: Int)
+          , flagSet = mempty
           }
 
 get :: Monad m => FDT s m (S s m)

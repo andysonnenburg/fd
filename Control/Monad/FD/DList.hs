@@ -9,7 +9,13 @@ module Control.Monad.FD.DList
        , uncons
        ) where
 
+import Data.Foldable (Foldable (fold, foldMap,
+                                foldr, foldr',
+                                foldl, foldl',
+                                foldr1, foldl1))
 import Data.Monoid
+
+import Prelude hiding (foldr, foldr1, foldl, foldl1)
 
 newtype DList a = DList { unDList :: [a] -> [a] }
 
@@ -42,3 +48,13 @@ instance Show a => Show (DList a) where
 instance Monoid (DList a) where
   mempty = empty
   mappend = append
+
+instance Foldable DList where
+  fold = fold . toList
+  foldMap f = foldMap f . toList
+  foldr f b = foldr f b . toList
+  foldr' f b = foldr' f b . toList
+  foldl f a = foldl f a . toList
+  foldl' f a = foldl' f a . toList
+  foldr1 f = foldr1 f . toList
+  foldl1 f = foldl1 f . toList

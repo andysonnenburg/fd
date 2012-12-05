@@ -27,7 +27,6 @@ library
     Control.Monad.FD.DList
     Control.Monad.FD.Dom
     Control.Monad.FD.HashMap.Lazy
-    Control.Monad.FD.HashSet
     Control.Monad.FD.Int
     Control.Monad.FD.Pruning
   build-depends:
