@@ -48,7 +48,7 @@ import qualified Control.Monad.FD.Dom as Dom
 import Control.Monad.FD.HashMap.Lazy (HashMap, (!))
 import qualified Control.Monad.FD.HashMap.Lazy as HashMap
 import Control.Monad.FD.Int
-import Control.Monad.FD.Pruning (Pruning)
+import Control.Monad.FD.Pruning (Pruning, affectedBy)
 import qualified Control.Monad.FD.Pruning as Pruning
 
 type FD s = FDT s Identity
@@ -175,9 +175,6 @@ addPropagator x r monotoneVars antimonotoneVars entailed = do
               Nothing ->
                 when (HashSet.null a) $
                   mark entailed
-
-affectedBy :: Pruning -> Pruning -> Bool
-a `affectedBy` b = Pruning.join a b == b
 
 label :: Monad m => Var s -> FDT s m Int
 label x = do
