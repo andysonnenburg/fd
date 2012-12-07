@@ -29,12 +29,10 @@ infixl 6 +!
 {-# NOINLINE (+!) #-}
 I# i +! I# j =
   case addIntC# i j of
-    (# r, c #) ->
-      if c ==# 0#
-      then I# r
-      else if r <# 0#
-           then maxBound
-           else minBound
+    (# r, c #)
+      | c ==# 0# -> I# r
+      | r <# 0# -> maxBound
+      | otherwise -> minBound
 #else
 a +! b =
   case toInteger a + toInteger b of
@@ -49,12 +47,10 @@ infixl 6 -!
 {-# NOINLINE (-!) #-}
 I# a -! I# b =
   case subIntC# a b of
-    (# r, c #) ->
-      if c ==# 0#
-      then I# r
-      else if r <# 0#
-           then maxBound
-           else minBound
+    (# r, c #)
+      | c ==# 0# -> I# r
+      | r <# 0# -> maxBound
+      | otherwise -> minBound
 #else
 a -! b =
   case toInteger a - toInteger b of
@@ -88,11 +84,9 @@ a@(I# i) *! b@(I# j) =
   if mulIntMayOflo# i j ==# 0#
   then I# (i *# j)
   else case toInteger a * toInteger b of
-    r -> if r < toInteger (minBound :: Int)
-         then minBound
-         else if r > toInteger (maxBound :: Int)
-              then maxBound
-              else fromInteger r
+    r | r < toInteger (minBound :: Int) -> minBound
+      | r > toInteger (maxBound :: Int) -> maxBound
+      | otherwise -> fromInteger r
 #endif
 #else
 a *! b =
