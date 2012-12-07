@@ -2,7 +2,6 @@
     DataKinds
   , EmptyDataDecls
   , KindSignatures
-  , NamedFieldPuns
   , Rank2Types
   , RecordWildCards #-}
 module Control.Monad.FD
@@ -20,10 +19,7 @@ module Control.Monad.FD
        ) where
 
 import Control.Applicative
-import Control.Monad (MonadPlus (mplus, mzero),
-                      liftM, liftM2,
-                      msum,
-                      unless, when)
+import Control.Monad (MonadPlus (mplus, mzero), liftM, liftM2, msum, when)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Logic (LogicT, observeAllT)
 import Control.Monad.State (StateT, evalStateT)
@@ -130,14 +126,22 @@ tell is = do
   entailed <- newFlag
   forM_ is $ \ (x `In` r) -> do
     (m, a) <- getConditionalRangeVars r
-    readDomain x >>= pruneDom r >>= maybe
-      (unless (HashSet.null a) $ addPropagator x r m a entailed)
-      (\ (d, pruning) -> do
-          when (HashSet.null m && Dom.null d) mzero
+    let addMonotonePropagator d pruning = do
+          when (Dom.null d) mzero
           addPropagator x r m a entailed
-          when (HashSet.null m) $ do
-            writeDomain x d
-            dispatchPruning x pruning)
+          writeDomain x d
+          dispatchPruning x pruning
+    case (HashSet.null m, HashSet.null a) of
+      (True, True) ->
+        readDomain x >>= pruneDom r >>=? uncurry addMonotonePropagator
+      (True, False) ->
+        readDomain x >>= pruneDom r >>= maybe
+        (addPropagator x r m a entailed)
+        (uncurry addMonotonePropagator)
+      (False, True) ->
+        readDomain x >>= pruneDom r >>? addPropagator x r m a entailed
+      (False, False) ->
+        addPropagator x r m a entailed
 
 addPropagator :: Monad m =>
                  Var s -> Range s ->
@@ -146,22 +150,36 @@ addPropagator :: Monad m =>
                  FDT s m ()
 addPropagator x r m a entailed = do
   propagator <- newPropagator m a
-  forM_ m $ \ x' -> addListener x' $ \ pruning ->
-    when (Pruning.val `affectedBy` pruning) $
-      modifyMonotoneVars propagator $ HashSet.delete x'
-  forM_ a $ \ x' -> addListener x' $ \ pruning ->
-    when (Pruning.val `affectedBy` pruning) $
-      modifyAntimonotoneVars propagator $ HashSet.delete x'
-  HashMap.forWithKeyM_ (rangeVars r) $ \ x' dependency ->
+  forM_ m $ \ x' ->
     addListener x' $ \ pruning ->
-      when (dependency `affectedBy` pruning) $
-        unlessMarked entailed $
-          readDomain x >>= pruneDom r >>= maybe
-          (whenAntimonotone propagator $ mark entailed)
-            (\ (d, pruning') -> whenMonotone propagator $ do
-                when (Dom.null d) mzero
-                writeDomain x d
-                dispatchPruning x pruning')
+      when (Pruning.val `affectedBy` pruning) $
+        modifyMonotoneVars propagator $ HashSet.delete x'
+  forM_ a $ \ x' ->
+    addListener x' $ \ pruning ->
+      when (Pruning.val `affectedBy` pruning) $
+        modifyAntimonotoneVars propagator $ HashSet.delete x'
+  HashMap.forWithKeyM_ (rangeVars r) $ \ x' dependentPruning ->
+    addListener x' $ \ pruning ->
+      when (dependentPruning `affectedBy` pruning) $
+        unlessMarked entailed $ do
+          PropagatorS {..} <- readPropagator propagator
+          case (HashSet.null monotoneVars, HashSet.null antimonotoneVars) of
+            (True, True) ->
+              readDomain x >>= pruneDom r >>= maybe
+              (mark entailed)
+              (uncurry $ propagatePruningOf x)
+            (True, False) ->
+              readDomain x >>= pruneDom r >>=? uncurry (propagatePruningOf x)
+            (False, True) ->
+              readDomain x >>= pruneDom r >>= flip whenNothing (mark entailed)
+            (False, False) ->
+              return ()
+
+propagatePruningOf :: Monad m => Var s -> Dom -> Pruning -> FDT s m ()
+propagatePruningOf x d pruning = do
+  when (Dom.null d) mzero
+  writeDomain x d
+  dispatchPruning x pruning
 
 label :: Monad m => Var s -> FDT s m Int
 label x = do
@@ -232,9 +250,6 @@ rangeVars r = case r of
   t1 :.. t2 -> (HashMap.unionWith Pruning.join `on` termVars) t1 t2
   Dom x -> HashMap.singleton x Pruning.dom
 
-dispatchPruning :: Monad m => Var s -> Pruning -> FDT s m ()
-dispatchPruning x pruning = readListeners x >>= mapM_ ($ pruning) . toList
-
 pruneDom :: Monad m => Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 pruneDom (t1 :.. t2) d = do
   i1 <- getVal t1
@@ -242,6 +257,9 @@ pruneDom (t1 :.. t2) d = do
   return $ Dom.intersection d (Dom.fromBounds i1 i2)
 pruneDom (Dom x) d =
   liftM (Dom.intersection d) $ readDomain x
+
+dispatchPruning :: Monad m => Var s -> Pruning -> FDT s m ()
+dispatchPruning x pruning = readListeners x >>= mapM_ ($ pruning) . toList
 
 getVal :: Monad m => Term s -> FDT s m Int
 getVal t = case t of
@@ -295,6 +313,11 @@ instance Hashable (Propagator s) where
   hash = hash . unwrapPropagator
   hashWithSalt salt = hashWithSalt salt . unwrapPropagator
 
+data PropagatorS s =
+  PropagatorS { monotoneVars :: MonotoneVars s
+              , antimonotoneVars :: AntimonotoneVars s
+              }
+
 newPropagator :: Monad m =>
                  MonotoneVars s ->
                  AntimonotoneVars s ->
@@ -303,34 +326,35 @@ newPropagator m a = do
   s@S {..} <- get
   let x = Propagator propagatorCount
   put s { propagatorCount = propagatorCount + 1
-        , monotoneVars = HashMap.insert x m monotoneVars
-        , antimonotoneVars = HashMap.insert x a antimonotoneVars
+        , propagators = HashMap.insert x PropagatorS { monotoneVars = m
+                                                     , antimonotoneVars = a
+                                                     } propagators
         }
   return x
 
-whenMonotone :: Monad m => Propagator s -> FDT s m () -> FDT s m ()
-whenMonotone x m = do
-  monotone <- liftM (HashSet.null . (!x)) $ gets monotoneVars
-  when monotone m
+readPropagator :: Monad m => Propagator s -> FDT s m (PropagatorS s)
+readPropagator x = liftM (!x) $ gets propagators
 
 modifyMonotoneVars :: Monad m =>
                       Propagator s ->
                       (MonotoneVars s -> MonotoneVars s) ->
                       FDT s m ()
-modifyMonotoneVars x f = modify $ \ s@S {..} ->
-  s { monotoneVars = HashMap.adjust f x monotoneVars }
-
-whenAntimonotone :: Monad m => Propagator s -> FDT s m () -> FDT s m ()
-whenAntimonotone x m = do
-  antimonotone <- liftM (HashSet.null . (!x)) $ gets antimonotoneVars
-  when antimonotone m
+modifyMonotoneVars x f = modifyPropagator x $ \ s@PropagatorS {..} ->
+   s { monotoneVars = f monotoneVars }
 
 modifyAntimonotoneVars :: Monad m =>
                           Propagator s ->
                           (AntimonotoneVars s -> AntimonotoneVars s) ->
                           FDT s m ()
-modifyAntimonotoneVars x f = modify $ \ s@S {..} ->
-  s { antimonotoneVars = HashMap.adjust f x antimonotoneVars }
+modifyAntimonotoneVars x f = modifyPropagator x $ \ s@PropagatorS {..} ->
+  s { antimonotoneVars = f antimonotoneVars }
+
+modifyPropagator :: Monad m =>
+                    Propagator s ->
+                    (PropagatorS s -> PropagatorS s) ->
+                    FDT s m ()
+modifyPropagator x f = modify $ \ s@S {..} ->
+  s { propagators = HashMap.adjust f x propagators }
 
 newtype Flag (s :: Region) = Flag { unwrapFlag :: Integer } deriving Eq
 
@@ -362,8 +386,7 @@ data S s m =
   S { varCount :: Integer
     , vars :: HashMap (Var s) (VarS s m)
     , propagatorCount :: Integer
-    , monotoneVars :: HashMap (Propagator s) (MonotoneVars s)
-    , antimonotoneVars :: HashMap (Propagator s) (AntimonotoneVars s)
+    , propagators :: HashMap (Propagator s) (PropagatorS s)
     , flagCount :: Integer
     , unmarkedFlags :: HashSet (Flag s)
     }
@@ -376,8 +399,7 @@ initS =
   S { varCount = toInteger (minBound :: Int)
     , vars = mempty
     , propagatorCount = toInteger (minBound :: Int)
-    , monotoneVars = mempty
-    , antimonotoneVars = mempty
+    , propagators = mempty
     , flagCount = toInteger (minBound :: Int)
     , unmarkedFlags = mempty
     }
@@ -393,6 +415,17 @@ modify = FDT . State.modify
 
 gets :: Monad m => (S s m -> a) -> FDT s m a
 gets = FDT . State.gets
+
+whenNothing :: Monad m => Maybe a -> m () -> m ()
+whenNothing p m = maybe m (const $ return ()) p
+
+infixl 1 >>=?
+(>>=?) :: Monad m => m (Maybe a) -> (a -> m ()) -> m ()
+m >>=? k = m >>= maybe (return ()) k
+
+infixl 1 >>?
+(>>?) :: Monad m => m (Maybe a) -> m () -> m ()
+m >>? n = m >>= maybe (return ()) (const n)
 
 for :: [a] -> (a -> b) -> [b]
 for = flip map
