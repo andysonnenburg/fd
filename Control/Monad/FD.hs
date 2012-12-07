@@ -101,7 +101,7 @@ freshVar = do
   s@S {..} <- get
   let x = Var varCount
   put s { varCount = varCount + 1
-        , varMap = HashMap.insert x initVarS varMap
+        , vars = HashMap.insert x initVarS vars
         }
   return x
 
@@ -130,48 +130,38 @@ tell is = do
   entailed <- newFlag
   forM_ is $ \ (x `In` r) -> do
     (m, a) <- getConditionalRangeVars r
-    readDomain x >>= pruneDom r >>= \ pruned -> case pruned of
-      Just (d, pruning) -> do
-        when (HashSet.null m && Dom.null d)
-          mzero
-        addPropagator x r m a entailed
-        when (HashSet.null m) $
-          writeDomain x d
-        dispatchPruning x pruning
-      Nothing ->
-        unless (HashSet.null a) $
+    readDomain x >>= pruneDom r >>= maybe
+      (unless (HashSet.null a) $ addPropagator x r m a entailed)
+      (\ (d, pruning) -> do
+          when (HashSet.null m && Dom.null d) mzero
           addPropagator x r m a entailed
+          when (HashSet.null m) $ do
+            writeDomain x d
+            dispatchPruning x pruning)
 
 addPropagator :: Monad m =>
                  Var s -> Range s ->
                  MonotoneVars s -> AntimonotoneVars s ->
                  Flag s ->
                  FDT s m ()
-addPropagator x r monotoneVars antimonotoneVars entailed = do
-  propagator <- newPropagator monotoneVars antimonotoneVars
-  forM_ monotoneVars $ \ x' ->
+addPropagator x r m a entailed = do
+  propagator <- newPropagator m a
+  forM_ m $ \ x' -> addListener x' $ \ pruning ->
+    when (Pruning.val `affectedBy` pruning) $
+      modifyMonotoneVars propagator $ HashSet.delete x'
+  forM_ a $ \ x' -> addListener x' $ \ pruning ->
+    when (Pruning.val `affectedBy` pruning) $
+      modifyAntimonotoneVars propagator $ HashSet.delete x'
+  HashMap.forWithKeyM_ (rangeVars r) $ \ x' dependency ->
     addListener x' $ \ pruning ->
-      when (Pruning.val `affectedBy` pruning) $
-        modifyMonotoneVars propagator $ HashSet.delete x'
-  forM_ antimonotoneVars $ \ x' ->
-    addListener x' $ \ pruning ->
-      when (Pruning.val `affectedBy` pruning) $
-        modifyAntimonotoneVars propagator $ HashSet.delete x'
-  HashMap.forWithKeyM_ (rangeVars r) $ \ x' expectedPruning ->
-    addListener x' $ \ actualPruning ->
-      when (expectedPruning `affectedBy` actualPruning) $
+      when (dependency `affectedBy` pruning) $
         unlessMarked entailed $
-          readDomain x >>= pruneDom r >>= \ pruned ->
-            case pruned of
-              Just (d, pruning) ->
-                whenMonotone propagator $ do
-                  when (Dom.null d)
-                    mzero
-                  writeDomain x d
-                  dispatchPruning x pruning
-              Nothing ->
-                whenAntimonotone propagator $
-                  mark entailed
+          readDomain x >>= pruneDom r >>= maybe
+          (whenAntimonotone propagator $ mark entailed)
+            (\ (d, pruning') -> whenMonotone propagator $ do
+                when (Dom.null d) mzero
+                writeDomain x d
+                dispatchPruning x pruning')
 
 label :: Monad m => Var s -> FDT s m Int
 label x = do
@@ -272,13 +262,13 @@ data VarS s m =
        }
 
 readVar :: Monad m => Var s -> FDT s m (VarS s m)
-readVar x = liftM (!x) $ gets varMap
+readVar x = liftM (!x) $ gets vars
 
 readDomain :: Monad m => Var s -> FDT s m Dom
 readDomain = liftM domain . readVar
 
 modifyVar :: Monad m => Var s -> (VarS s m -> VarS s m) -> FDT s m ()
-modifyVar x f = modify $ \ s@S {..} -> s { varMap = HashMap.adjust f x varMap }
+modifyVar x f = modify $ \ s@S {..} -> s { vars = HashMap.adjust f x vars }
 
 writeDomain :: Monad m => Var s -> Dom -> FDT s m ()
 writeDomain x d = modifyVar x $ \ s@VarS {..} -> s { domain = d }
@@ -313,14 +303,14 @@ newPropagator m a = do
   s@S {..} <- get
   let x = Propagator propagatorCount
   put s { propagatorCount = propagatorCount + 1
-        , monotoneVarsMap = HashMap.insert x m monotoneVarsMap
-        , antimonotoneVarsMap = HashMap.insert x a antimonotoneVarsMap
+        , monotoneVars = HashMap.insert x m monotoneVars
+        , antimonotoneVars = HashMap.insert x a antimonotoneVars
         }
   return x
 
 whenMonotone :: Monad m => Propagator s -> FDT s m () -> FDT s m ()
 whenMonotone x m = do
-  monotone <- liftM (HashSet.null . (!x)) $ gets monotoneVarsMap
+  monotone <- liftM (HashSet.null . (!x)) $ gets monotoneVars
   when monotone m
 
 modifyMonotoneVars :: Monad m =>
@@ -328,11 +318,11 @@ modifyMonotoneVars :: Monad m =>
                       (MonotoneVars s -> MonotoneVars s) ->
                       FDT s m ()
 modifyMonotoneVars x f = modify $ \ s@S {..} ->
-  s { monotoneVarsMap = HashMap.adjust f x monotoneVarsMap }
+  s { monotoneVars = HashMap.adjust f x monotoneVars }
 
 whenAntimonotone :: Monad m => Propagator s -> FDT s m () -> FDT s m ()
 whenAntimonotone x m = do
-  antimonotone <- liftM (HashSet.null . (!x)) $ gets antimonotoneVarsMap
+  antimonotone <- liftM (HashSet.null . (!x)) $ gets antimonotoneVars
   when antimonotone m
 
 modifyAntimonotoneVars :: Monad m =>
@@ -340,7 +330,7 @@ modifyAntimonotoneVars :: Monad m =>
                           (AntimonotoneVars s -> AntimonotoneVars s) ->
                           FDT s m ()
 modifyAntimonotoneVars x f = modify $ \ s@S {..} ->
-  s { antimonotoneVarsMap = HashMap.adjust f x antimonotoneVarsMap }
+  s { antimonotoneVars = HashMap.adjust f x antimonotoneVars }
 
 newtype Flag (s :: Region) = Flag { unwrapFlag :: Integer } deriving Eq
 
@@ -353,42 +343,44 @@ newFlag = do
   s@S {..} <- get
   let flag = Flag flagCount
   put s { flagCount = flagCount + 1
-        , flagSet = HashSet.insert flag flagSet
+        , unmarkedFlags = HashSet.insert flag unmarkedFlags
         }
   return flag
 
 unlessMarked :: Monad m => Flag s -> FDT s m () -> FDT s m ()
 unlessMarked flag m = do
-  unmarked <- liftM (HashSet.member flag) (gets flagSet)
+  unmarked <- liftM (HashSet.member flag) (gets unmarkedFlags)
   when unmarked m
 
 mark :: Monad m => Flag s -> FDT s m ()
-mark flag = modify $ \ s@S {..} -> s { flagSet = HashSet.delete flag flagSet }
+mark flag = modify $ \ s@S {..} ->
+  s { unmarkedFlags = HashSet.delete flag unmarkedFlags }
 
 data Region
 
 data S s m =
   S { varCount :: Integer
-    , varMap :: HashMap (Var s) (VarS s m)
+    , vars :: HashMap (Var s) (VarS s m)
     , propagatorCount :: Integer
-    , monotoneVarsMap :: HashMap (Propagator s) (MonotoneVars s)
-    , antimonotoneVarsMap :: HashMap (Propagator s) (AntimonotoneVars s)
+    , monotoneVars :: HashMap (Propagator s) (MonotoneVars s)
+    , antimonotoneVars :: HashMap (Propagator s) (AntimonotoneVars s)
     , flagCount :: Integer
-    , flagSet :: HashSet (Flag s)
+    , unmarkedFlags :: HashSet (Flag s)
     }
 
 type MonotoneVars s = HashSet (Var s)
 type AntimonotoneVars s = HashSet (Var s)
 
 initS :: Monad m => S s m
-initS = S { varCount = toInteger (minBound :: Int)
-          , varMap = mempty
-          , propagatorCount = toInteger (minBound :: Int)
-          , monotoneVarsMap = mempty
-          , antimonotoneVarsMap = mempty
-          , flagCount = toInteger (minBound :: Int)
-          , flagSet = mempty
-          }
+initS =
+  S { varCount = toInteger (minBound :: Int)
+    , vars = mempty
+    , propagatorCount = toInteger (minBound :: Int)
+    , monotoneVars = mempty
+    , antimonotoneVars = mempty
+    , flagCount = toInteger (minBound :: Int)
+    , unmarkedFlags = mempty
+    }
 
 get :: Monad m => FDT s m (S s m)
 get = FDT State.get
