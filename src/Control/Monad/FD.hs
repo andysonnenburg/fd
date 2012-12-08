@@ -278,6 +278,13 @@ data VarS s m =
        , listeners :: DList (Listener s m)
        }
 
+type Listener s m = Pruning -> FDT s m ()
+
+initVarS :: VarS s m
+initVarS = VarS { domain = Dom.full
+                , listeners = mempty
+                }
+
 readVar :: Monad m => Var s -> FDT s m (VarS s m)
 readVar x = liftM (!x) $ gets vars
 
@@ -297,13 +304,6 @@ addListener :: Monad m => Var s -> (Pruning -> FDT s m ()) -> FDT s m ()
 addListener x listener = modifyVar x $ \ s@VarS {..} ->
   s { listeners = DList.snoc listeners listener }
 
-type Listener s m = Pruning -> FDT s m ()
-
-initVarS :: VarS s m
-initVarS = VarS { domain = Dom.full
-                , listeners = mempty
-                }
-
 newtype Propagator (s :: Region) =
   Propagator { unwrapPropagator :: Integer
              } deriving Eq
@@ -316,6 +316,9 @@ data PropagatorS s =
   PropagatorS { monotoneVars :: MonotoneVars s
               , antimonotoneVars :: AntimonotoneVars s
               }
+
+type MonotoneVars s = HashSet (Var s)
+type AntimonotoneVars s = HashSet (Var s)
 
 newPropagator :: Monad m =>
                  MonotoneVars s ->
@@ -389,9 +392,6 @@ data S s m =
     , flagCount :: Integer
     , unmarkedFlags :: HashSet (Flag s)
     }
-
-type MonotoneVars s = HashSet (Var s)
-type AntimonotoneVars s = HashSet (Var s)
 
 initS :: Monad m => S s m
 initS =

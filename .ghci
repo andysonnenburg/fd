@@ -1,0 +1,2 @@
+:set -package-conf dist/package.conf.inplace
+import Control.Monad.FD
