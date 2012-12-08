@@ -32,11 +32,15 @@ library
   build-depends:
     base >= 4 && < 5,
     transformers >= 0.2 && < 0.4,
-    mtl >= 2.0 && < 2.2,
     logict,
     containers,
     hashable,
     unordered-containers
+  other-extensions:
+    EmptyDataDecls,
+    KindSignatures,
+    Rank2Types,
+    RecordWildCards
   if impl(ghc)
     other-extensions: MagicHash, UnboxedTuples
   if flag(integer-gmp)

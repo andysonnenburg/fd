@@ -19,11 +19,16 @@ module Control.Monad.FD
        ) where
 
 import Control.Applicative
-import Control.Monad (MonadPlus (mplus, mzero), liftM, liftM2, msum, when)
+import Control.Monad (MonadPlus (mplus, mzero),
+                      liftM,
+                      liftM2,
+                      msum,
+                      unless,
+                      when)
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Logic (LogicT, observeAllT)
-import Control.Monad.State (StateT, evalStateT)
-import qualified Control.Monad.State as State
+import Control.Monad.Trans.State (StateT, evalStateT)
+import qualified Control.Monad.Trans.State as State
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (forM_, toList)
@@ -126,20 +131,18 @@ tell is = do
   entailed <- newFlag
   forM_ is $ \ (x `In` r) -> do
     (m, a) <- getConditionalRangeVars r
-    let addMonotonePropagator d pruning = do
-          when (Dom.null d) mzero
-          addPropagator x r m a entailed
-          writeDomain x d
-          dispatchPruning x pruning
     case (HashSet.null m, HashSet.null a) of
-      (True, True) ->
-        readDomain x >>= pruneDom r >>=? uncurry addMonotonePropagator
-      (True, False) ->
+      (True, antimonotone) ->
         readDomain x >>= pruneDom r >>= maybe
-        (addPropagator x r m a entailed)
-        (uncurry addMonotonePropagator)
+        (unless antimonotone $ addPropagator x r m a entailed)
+        (\ (d, pruning) -> do
+            when (Dom.null d) mzero
+            addPropagator x r m a entailed
+            writeDomain x d
+            dispatchPruning x pruning)
       (False, True) ->
-        readDomain x >>= pruneDom r >>? addPropagator x r m a entailed
+        readDomain x >>= pruneDom r >>=
+        flip whenNothing (addPropagator x r m a entailed)
       (False, False) ->
         addPropagator x r m a entailed
 
@@ -164,22 +167,18 @@ addPropagator x r m a entailed = do
         unlessMarked entailed $ do
           PropagatorS {..} <- readPropagator propagator
           case (HashSet.null monotoneVars, HashSet.null antimonotoneVars) of
-            (True, True) ->
+            (True, antimonotone) ->
               readDomain x >>= pruneDom r >>= maybe
-              (mark entailed)
-              (uncurry $ propagatePruningOf x)
-            (True, False) ->
-              readDomain x >>= pruneDom r >>=? uncurry (propagatePruningOf x)
+              (when antimonotone $ mark entailed)
+              (\ (d, pruning') -> do
+                  when (Dom.null d) mzero
+                  writeDomain x d
+                  dispatchPruning x pruning')
             (False, True) ->
-              readDomain x >>= pruneDom r >>= flip whenNothing (mark entailed)
+              readDomain x >>= pruneDom r >>=
+              flip whenNothing (mark entailed)
             (False, False) ->
               return ()
-
-propagatePruningOf :: Monad m => Var s -> Dom -> Pruning -> FDT s m ()
-propagatePruningOf x d pruning = do
-  when (Dom.null d) mzero
-  writeDomain x d
-  dispatchPruning x pruning
 
 label :: Monad m => Var s -> FDT s m Int
 label x = do
@@ -418,14 +417,6 @@ gets = FDT . State.gets
 
 whenNothing :: Monad m => Maybe a -> m () -> m ()
 whenNothing p m = maybe m (const $ return ()) p
-
-infixl 1 >>=?
-(>>=?) :: Monad m => m (Maybe a) -> (a -> m ()) -> m ()
-m >>=? k = m >>= maybe (return ()) k
-
-infixl 1 >>?
-(>>?) :: Monad m => m (Maybe a) -> m () -> m ()
-m >>? n = m >>= maybe (return ()) (const n)
 
 for :: [a] -> (a -> b) -> [b]
 for = flip map
