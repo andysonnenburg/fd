@@ -40,8 +40,6 @@ import qualified Data.HashSet as HashSet
 import Data.Monoid
 import Data.Tuple (swap)
 
-import Prelude hiding (max, min)
-
 import Control.Monad.FD.DList (DList)
 import qualified Control.Monad.FD.DList as DList
 import Control.Monad.FD.Dom (Dom)
@@ -135,10 +133,10 @@ tell is = do
       (True, antimonotone) ->
         readDomain x >>= pruneDom r >>= maybe
         (unless antimonotone $ addPropagator x r m a entailed)
-        (\ (d, pruning) -> do
-            when (Dom.null d) mzero
+        (\ (dom, pruning) -> do
+            when (Dom.null dom) mzero
             addPropagator x r m a entailed
-            writeDomain x d
+            writeDomain x dom
             dispatchPruning x pruning)
       (False, True) ->
         readDomain x >>= pruneDom r >>=
@@ -170,9 +168,9 @@ addPropagator x r m a entailed = do
             (True, antimonotone) ->
               readDomain x >>= pruneDom r >>= maybe
               (when antimonotone $ mark entailed)
-              (\ (d, pruning') -> do
-                  when (Dom.null d) mzero
-                  writeDomain x d
+              (\ (dom, pruning') -> do
+                  when (Dom.null dom) mzero
+                  writeDomain x dom
                   dispatchPruning x pruning')
             (False, True) ->
               readDomain x >>= pruneDom r >>=
@@ -182,8 +180,8 @@ addPropagator x r m a entailed = do
 
 label :: Monad m => Var s -> FDT s m Int
 label x = do
-  d <- readDomain x
-  case Dom.toList d of
+  dom <- readDomain x
+  case Dom.toList dom of
     [i] -> return i
     is -> msum $ for is $ \ i -> do
       writeDomain x $ Dom.singleton i
@@ -250,12 +248,12 @@ rangeVars r = case r of
   Dom x -> HashMap.singleton x Pruning.dom
 
 pruneDom :: Monad m => Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
-pruneDom (t1 :.. t2) d = do
+pruneDom (t1 :.. t2) dom = do
   i1 <- getVal t1
   i2 <- getVal t2
-  return $ Dom.intersection d (Dom.fromBounds i1 i2)
-pruneDom (Dom x) d =
-  liftM (Dom.intersection d) $ readDomain x
+  return $ Dom.intersection dom (Dom.fromBounds i1 i2)
+pruneDom (Dom x) dom =
+  liftM (Dom.intersection dom) $ readDomain x
 
 dispatchPruning :: Monad m => Var s -> Pruning -> FDT s m ()
 dispatchPruning x pruning = readListeners x >>= mapM_ ($ pruning) . toList
