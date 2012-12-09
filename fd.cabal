@@ -24,6 +24,7 @@ library
   hs-source-dirs: src
   exposed-modules:
     Control.Monad.FD
+    Control.Monad.FD.Sugar
   other-modules:
     Control.Monad.FD.DList
     Control.Monad.FD.Dom
@@ -39,7 +40,9 @@ library
     unordered-containers
   other-extensions:
     EmptyDataDecls,
+    FunctionalDependencies,
     KindSignatures,
+    MultiParamTypeClasses
     Rank2Types,
     RecordWildCards
   if impl(ghc)
