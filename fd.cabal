@@ -23,14 +23,13 @@ library
   default-language: Haskell98
   hs-source-dirs: src
   exposed-modules:
-    Control.Monad.FD
-    Control.Monad.FD.Sugar
+    Control.Monad.FD.Internal
   other-modules:
-    Control.Monad.FD.DList
-    Control.Monad.FD.Dom
-    Control.Monad.FD.HashMap.Lazy
-    Control.Monad.FD.Int
-    Control.Monad.FD.Pruning
+    Control.Monad.FD.Internal.DList
+    Control.Monad.FD.Internal.Dom
+    Control.Monad.FD.Internal.HashMap.Lazy
+    Control.Monad.FD.Internal.Int
+    Control.Monad.FD.Internal.Pruning
   build-depends:
     base >= 4 && < 5,
     transformers >= 0.2 && < 0.4,

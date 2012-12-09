@@ -1,4 +1,4 @@
-module Control.Monad.FD.Pruning
+module Control.Monad.FD.Internal.Pruning
        ( Pruning, join, affectedBy, dom, min, max, val
        ) where
 

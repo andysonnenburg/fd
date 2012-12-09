@@ -1,4 +1,4 @@
-module Control.Monad.FD.DList
+module Control.Monad.FD.Internal.DList
        ( DList
        , append
        , empty

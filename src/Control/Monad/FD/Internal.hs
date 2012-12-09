@@ -1,19 +1,28 @@
 {-# LANGUAGE
     DataKinds
   , EmptyDataDecls
+  , FunctionalDependencies
   , KindSignatures
+  , MultiParamTypeClasses
   , Rank2Types
   , RecordWildCards #-}
-module Control.Monad.FD
+module Control.Monad.FD.Internal
        ( FD
        , runFD
        , FDT
        , runFDT
        , Var
        , freshVar
-       , Term (..)
-       , Range (..)
-       , Indexical (..)
+       , Term
+       , Sum ((+), (-), negate, fromInteger)
+       , Product ((*))
+       , Quotient (quot, div)
+       , min
+       , max
+       , Range ((:..))
+       , dom
+       , Indexical
+       , in'
        , tell
        , label
        ) where
@@ -37,18 +46,21 @@ import Data.Functor.Identity
 import Data.Hashable
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
-import Data.Monoid
+import Data.Monoid ((<>), mempty)
 import Data.Tuple (swap)
 
-import Control.Monad.FD.DList (DList)
-import qualified Control.Monad.FD.DList as DList
-import Control.Monad.FD.Dom (Dom)
-import qualified Control.Monad.FD.Dom as Dom
-import Control.Monad.FD.HashMap.Lazy (HashMap, (!))
-import qualified Control.Monad.FD.HashMap.Lazy as HashMap
-import Control.Monad.FD.Int
-import Control.Monad.FD.Pruning (Pruning, affectedBy)
-import qualified Control.Monad.FD.Pruning as Pruning
+import Prelude hiding (Num (..), div, min, max, quot)
+import qualified Prelude
+
+import Control.Monad.FD.Internal.DList (DList)
+import qualified Control.Monad.FD.Internal.DList as DList
+import Control.Monad.FD.Internal.Dom (Dom)
+import qualified Control.Monad.FD.Internal.Dom as Dom
+import Control.Monad.FD.Internal.HashMap.Lazy (HashMap, (!))
+import qualified Control.Monad.FD.Internal.HashMap.Lazy as HashMap
+import Control.Monad.FD.Internal.Int
+import Control.Monad.FD.Internal.Pruning (Pruning, affectedBy)
+import qualified Control.Monad.FD.Internal.Pruning as Pruning
 
 type FD s = FDT s Identity
 
@@ -116,13 +128,76 @@ data Term s
   | Min (Var s)
   | Max (Var s)
 
+infixl 6 +, -
+class Sum a where
+  (+) :: a -> a -> a
+  (-) :: a -> a -> a
+  negate :: a -> a
+  negate = (fromInteger 0 -)
+  fromInteger :: Integer -> a
+
+infixl 7 *
+class (Sum a, Sum b, Sum c) => Product a b c | a b -> c where
+  (*) :: a -> b -> c
+
+class (Product a b a, Product b a a) => Quotient a b | a -> b where
+  quot :: a -> b -> a
+  div :: a -> b -> a
+
+instance Sum Int where
+  (+) = (Prelude.+)
+  (-) = (Prelude.-)
+  negate = Prelude.negate
+  fromInteger = Prelude.fromInteger
+
+instance Product Int Int Int where
+  (*) = (Prelude.*)
+
+instance Quotient Int Int where
+  quot = Prelude.quot
+  div = Prelude.div
+
+instance Sum Integer where
+  (+) = (Prelude.+)
+  (-) = (Prelude.-)
+  negate = Prelude.negate
+  fromInteger = Prelude.fromInteger
+
+instance Sum (Term s) where
+  (+) = (:+)
+  (-) = (:-)
+  fromInteger = Int . fromInteger
+
+instance Product Int (Term s) (Term s) where
+  (*) = (:*)
+
+instance Product (Term s) Int (Term s) where
+  (*) = flip (:*)
+
+instance Quotient (Term s) Int where
+  quot = Quot
+  div = Div
+
+min :: Var s -> Term s
+min = Min
+
+max :: Var s -> Term s
+max = Max
+
 infix 5 :..
 data Range s
   = Term s :.. Term s
   | Dom (Var s)
 
+dom :: Var s -> Range s
+dom = Dom
+
 infixr 1 `In`
 data Indexical s = Var s `In` Range s
+
+infixr 1 `in'`
+in' :: Var s -> Range s -> Indexical s
+in' = In
 
 tell :: Monad m => [Indexical s] -> FDT s m ()
 tell is = do
@@ -133,11 +208,11 @@ tell is = do
       (True, antimonotone) ->
         readDomain x >>= pruneDom r >>= maybe
         (unless antimonotone $ addPropagator x r m a entailed)
-        (\ (dom, pruning) -> do
-            when (Dom.null dom) mzero
+        (\ (dom', pruning) -> do
+            when (Dom.null dom') mzero
             addPropagator x r m a entailed
-            writeDomain x dom
-            dispatchPruning x pruning)
+            writeDomain x dom'
+            pruned x pruning)
       (False, True) ->
         readDomain x >>= pruneDom r >>=
         flip whenNothing (addPropagator x r m a entailed)
@@ -152,15 +227,15 @@ addPropagator :: Monad m =>
 addPropagator x r m a entailed = do
   propagator <- newPropagator m a
   forM_ m $ \ x' ->
-    addListener x' $ \ pruning ->
+    whenPruned x' $ \ pruning ->
       when (Pruning.val `affectedBy` pruning) $
         modifyMonotoneVars propagator $ HashSet.delete x'
   forM_ a $ \ x' ->
-    addListener x' $ \ pruning ->
+    whenPruned x' $ \ pruning ->
       when (Pruning.val `affectedBy` pruning) $
         modifyAntimonotoneVars propagator $ HashSet.delete x'
   HashMap.forWithKeyM_ (rangeVars r) $ \ x' dependentPruning ->
-    addListener x' $ \ pruning ->
+    whenPruned x' $ \ pruning ->
       when (dependentPruning `affectedBy` pruning) $
         unlessMarked entailed $ do
           PropagatorS {..} <- readPropagator propagator
@@ -168,10 +243,10 @@ addPropagator x r m a entailed = do
             (True, antimonotone) ->
               readDomain x >>= pruneDom r >>= maybe
               (when antimonotone $ mark entailed)
-              (\ (dom, pruning') -> do
-                  when (Dom.null dom) mzero
-                  writeDomain x dom
-                  dispatchPruning x pruning')
+              (\ (dom', pruning') -> do
+                  when (Dom.null dom') mzero
+                  writeDomain x dom'
+                  pruned x pruning')
             (False, True) ->
               readDomain x >>= pruneDom r >>=
               flip whenNothing (mark entailed)
@@ -180,12 +255,12 @@ addPropagator x r m a entailed = do
 
 label :: Monad m => Var s -> FDT s m Int
 label x = do
-  dom <- readDomain x
-  case Dom.toList dom of
+  dom' <- readDomain x
+  case Dom.toList dom' of
     [i] -> return i
     is -> msum $ for is $ \ i -> do
       writeDomain x $ Dom.singleton i
-      dispatchPruning x Pruning.val
+      pruned x Pruning.val
       return i
 
 type ConditionalVars s = (HashSet (Var s), HashSet (Var s))
@@ -248,15 +323,15 @@ rangeVars r = case r of
   Dom x -> HashMap.singleton x Pruning.dom
 
 pruneDom :: Monad m => Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
-pruneDom (t1 :.. t2) dom = do
+pruneDom (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
-  return $ Dom.intersection dom (Dom.fromBounds i1 i2)
-pruneDom (Dom x) dom =
-  liftM (Dom.intersection dom) $ readDomain x
+  return $ Dom.intersection dom' (Dom.fromBounds i1 i2)
+pruneDom (Dom x) dom' =
+  liftM (Dom.intersection dom') $ readDomain x
 
-dispatchPruning :: Monad m => Var s -> Pruning -> FDT s m ()
-dispatchPruning x pruning = readListeners x >>= mapM_ ($ pruning) . toList
+pruned :: Monad m => Var s -> Pruning -> FDT s m ()
+pruned x pruning = readListeners x >>= mapM_ ($ pruning) . toList
 
 getVal :: Monad m => Term s -> FDT s m Int
 getVal t = case t of
@@ -298,8 +373,8 @@ writeDomain x d = modifyVar x $ \ s@VarS {..} -> s { domain = d }
 readListeners :: Monad m => Var s -> FDT s m (DList (Listener s m))
 readListeners = liftM listeners . readVar
 
-addListener :: Monad m => Var s -> (Pruning -> FDT s m ()) -> FDT s m ()
-addListener x listener = modifyVar x $ \ s@VarS {..} ->
+whenPruned :: Monad m => Var s -> (Pruning -> FDT s m ()) -> FDT s m ()
+whenPruned x listener = modifyVar x $ \ s@VarS {..} ->
   s { listeners = DList.snoc listeners listener }
 
 newtype Propagator (s :: Region) =

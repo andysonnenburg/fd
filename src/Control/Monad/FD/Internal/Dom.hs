@@ -1,4 +1,4 @@
-module Control.Monad.FD.Dom
+module Control.Monad.FD.Internal.Dom
        ( Dom
        , fromBounds
        , full
@@ -17,8 +17,8 @@ module Control.Monad.FD.Dom
 import Prelude hiding (max, min, null)
 import qualified Prelude
 
-import Control.Monad.FD.Pruning (Pruning)
-import qualified Control.Monad.FD.Pruning as Pruning
+import Control.Monad.FD.Internal.Pruning (Pruning)
+import qualified Control.Monad.FD.Internal.Pruning as Pruning
 
 data Dom = Bounds Int Int
 

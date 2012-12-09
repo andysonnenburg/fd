@@ -1,4 +1,4 @@
-module Control.Monad.FD.HashMap.Lazy
+module Control.Monad.FD.Internal.HashMap.Lazy
        ( module Data.HashMap.Lazy
        , forWithKeyM_
        ) where

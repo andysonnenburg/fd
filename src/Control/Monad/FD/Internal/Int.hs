@@ -2,7 +2,7 @@
 #ifdef __GLASGOW_HASKELL__
 {-# LANGUAGE MagicHash, UnboxedTuples #-}
 #endif
-module Control.Monad.FD.Int ((+!), (-!), (*!)) where
+module Control.Monad.FD.Internal.Int ((+!), (-!), (*!)) where
 
 #ifdef __GLASGOW_HASKELL__
 import GHC.Exts (Int (I#),
