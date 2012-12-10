@@ -8,6 +8,7 @@ module Control.Monad.FD
        , runFDT
        , Term
        , freshTerm
+       , fromVar
        , Sum ((+), (-), negate, fromInteger)
        , Product ((*))
        , Quotient (quot, div)
@@ -32,7 +33,10 @@ import qualified Control.Monad.FD.Internal as Internal
 data Term s = Term (HashMap (Var s) Int) Int
 
 freshTerm :: Monad m => FDT s m (Term s)
-freshTerm = liftM (flip Term 0 . flip HashMap.singleton 1) freshVar
+freshTerm = liftM fromVar freshVar
+
+fromVar :: Var s -> Term s
+fromVar = flip Term 0 . flip HashMap.singleton 1
 
 instance Sum (Term s) where
   Term x1 y1 + Term x2 y2 =
