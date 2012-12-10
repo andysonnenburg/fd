@@ -14,7 +14,8 @@ module Control.Monad.FD.Internal
        , Var
        , freshVar
        , Term
-       , Sum ((+), (-), negate, fromInteger)
+       , IsInteger (fromInteger)
+       , Sum ((+), (-), negate)
        , Product ((*))
        , Quotient (quot, div)
        , min
@@ -129,26 +130,30 @@ data Term s
   | Max (Var s)
 
 infixl 6 +, -
-class Sum a where
-  (+) :: a -> a -> a
-  (-) :: a -> a -> a
-  negate :: a -> a
-  negate = (fromInteger 0 -)
+infixl 7 *, `quot`, `div`
+
+class IsInteger a where
   fromInteger :: Integer -> a
 
-infixl 7 *
-class (Sum a, Sum b) => Product a b | b -> a where
+class IsInteger b => Sum a b | a -> b where
+  (+) :: a -> b -> a
+  (-) :: a -> b -> a
+  negate :: a -> a
+
+class (Sum a a, Sum b b) => Product a b | b -> a where
   (*) :: a -> b -> b
 
 class Product b a => Quotient a b | a -> b where
   quot :: a -> b -> a
   div :: a -> b -> a
 
-instance Sum Int where
+instance IsInteger Int where
+  fromInteger = Prelude.fromInteger
+
+instance Sum Int Int where
   (+) = (Prelude.+)
   (-) = (Prelude.-)
   negate = Prelude.negate
-  fromInteger = Prelude.fromInteger
 
 instance Product Int Int where
   (*) = (Prelude.*)
@@ -161,11 +166,13 @@ instance Bounded (Term s) where
   minBound = Int minBound
   maxBound = Int maxBound
 
-instance Sum (Term s) where
+instance IsInteger (Term s) where
+  fromInteger = Int . fromInteger
+
+instance Sum (Term s) (Term s) where
   (+) = (:+)
   (-) = (:-)
   negate = (Prelude.fromInteger (-1) :*)
-  fromInteger = Int . fromInteger
 
 instance Product Int (Term s) where
   (*) = (:*)

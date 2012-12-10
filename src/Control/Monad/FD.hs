@@ -10,7 +10,8 @@ module Control.Monad.FD
        , freshTerm
        , fromVar
        , fromInt
-       , Sum ((+), (-), negate, fromInteger)
+       , IsInteger (fromInteger)
+       , Sum ((+), (-), negate)
        , Product ((*))
        , Quotient (quot, div)
        , (#=)
@@ -29,7 +30,6 @@ import qualified Data.HashMap.Lazy as HashMap
 import Data.Monoid (mempty)
 
 import Prelude hiding (Num (..), div, fromIntegral, max, min, quot)
-import Prelude (abs)
 
 import Control.Monad.FD.Internal hiding (Term, label, max, min)
 import qualified Control.Monad.FD.Internal as Internal
@@ -50,21 +50,23 @@ instance Bounded (Term s) where
   minBound = fromInt minBound
   maxBound = fromInt maxBound
 
-instance Sum (Term s) where
+instance IsInteger (Term s) where
+  fromInteger = Term mempty . fromInteger
+
+instance Sum (Term s) (Term s) where
   Term x1 y1 + Term x2 y2 =
     Term (HashMap.unionWith (+!) x1 x2) (y1 +! y2)
   Term x1 y1 - Term x2 y2 =
     Term (HashMap.unionWith (+!) x1 (negate <$> x2)) (y1 -! y2)
   negate (Term x y) =
     Term (negate <$> x) (negate y)
-  fromInteger =
-    Term mempty . fromInteger
 
 instance Product Int (Term s) where
   a * Term x y = Term ((a *!) <$> x) (a *! y)
 
-infix 4 #=
-(#=) :: Monad m => Term s -> Term s -> FDT s m ()
+infix 4 #=, #<, #<=, #>, #>=
+(#=), (#<), (#<=), (#>), (#>=) :: Monad m => Term s -> Term s -> FDT s m ()
+
 Term x1 y1 #= Term x2 y2 = tell $ i1 ++ i2
   where
     i1 = for (HashMap.toList x1) $ \ (k, v) ->
@@ -81,10 +83,6 @@ Term x1 y1 #= Term x2 y2 = tell $ i1 ++ i2
       where
         x = HashMap.unionWith (+) x1 (negate <$> x2)
         y = fromIntegral $ y1 -! y2
-
-
-infix 4 #<, #<=, #>, #>=
-(#<), (#<=), (#>), (#>=) :: Monad m => Term s -> Term s -> FDT s m ()
 
 Term x1 y1 #>= Term x2 y2 = tell $ i1 ++ i2
   where
@@ -142,7 +140,7 @@ label (Term x y) =
   where
     f a k v = liftM2 (+) a (liftM (v *) $ Internal.label k)
 
-fromIntegral :: (Integral a, Sum b) => a -> b
+fromIntegral :: (Integral a, IsInteger b) => a -> b
 fromIntegral = fromInteger . toInteger
 
 for :: [a] -> (a -> b) -> [b]
