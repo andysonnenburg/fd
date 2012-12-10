@@ -76,10 +76,9 @@ Term x1 y1 #>= Term x2 y2 = tell $ i1 ++ i2
     i1 = for (HashMap.toList x1) $ \ (k, v) ->
       let x' = HashMap.delete k x
           (min, max) = extrema x' y v
-          (min', max') = case compare v 0 of
-            GT -> (min, maxBound)
-            EQ -> (fromInteger 0, fromInteger 0)
-            LT -> (minBound, max)
+          (min', max')
+            | v >= 0 = (min, maxBound)
+            | otherwise = (minBound, max)
       in k `in'` min' :.. max'
       where
         x = HashMap.unionWith (+) x2 (negate <$> x1)
@@ -87,10 +86,9 @@ Term x1 y1 #>= Term x2 y2 = tell $ i1 ++ i2
     i2 = for (HashMap.toList x2) $ \ (k, v) ->
       let x' = HashMap.delete k x
           (min, max) = extrema x' y v
-          (min', max') = case compare v 0 of
-            GT -> (minBound, max)
-            EQ -> (fromInteger 0, fromInteger 0)
-            LT -> (min, maxBound)
+          (min', max')
+            | v >= 0 = (minBound, max)
+            | otherwise = (min, maxBound)
       in k `in'` min' :.. max'
       where
         x = HashMap.unionWith (+) x1 (negate <$> x2)
