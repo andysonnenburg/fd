@@ -111,7 +111,7 @@ freshVar :: Monad m => FDT s m (Var s)
 freshVar = do
   s@S {..} <- get
   let x = Var varCount
-  put s { varCount = varCount + 1
+  put s { varCount = varCount Prelude.+ 1
         , vars = HashMap.insert x initVarS vars
         }
   return x
@@ -137,10 +137,10 @@ class Sum a where
   fromInteger :: Integer -> a
 
 infixl 7 *
-class (Sum a, Sum b, Sum c) => Product a b c | a b -> c where
-  (*) :: a -> b -> c
+class (Sum a, Sum b) => Product a b | b -> a where
+  (*) :: a -> b -> b
 
-class (Product a b a, Product b a a) => Quotient a b | a -> b where
+class Product b a => Quotient a b | a -> b where
   quot :: a -> b -> a
   div :: a -> b -> a
 
@@ -150,29 +150,25 @@ instance Sum Int where
   negate = Prelude.negate
   fromInteger = Prelude.fromInteger
 
-instance Product Int Int Int where
+instance Product Int Int where
   (*) = (Prelude.*)
 
 instance Quotient Int Int where
   quot = Prelude.quot
   div = Prelude.div
 
-instance Sum Integer where
-  (+) = (Prelude.+)
-  (-) = (Prelude.-)
-  negate = Prelude.negate
-  fromInteger = Prelude.fromInteger
+instance Bounded (Term s) where
+  minBound = Int minBound
+  maxBound = Int maxBound
 
 instance Sum (Term s) where
   (+) = (:+)
   (-) = (:-)
+  negate = (Prelude.fromInteger (-1) :*)
   fromInteger = Int . fromInteger
 
-instance Product Int (Term s) (Term s) where
+instance Product Int (Term s) where
   (*) = (:*)
-
-instance Product (Term s) Int (Term s) where
-  (*) = flip (:*)
 
 instance Quotient (Term s) Int where
   quot = Quot
@@ -400,7 +396,7 @@ newPropagator :: Monad m =>
 newPropagator m a = do
   s@S {..} <- get
   let x = Propagator propagatorCount
-  put s { propagatorCount = propagatorCount + 1
+  put s { propagatorCount = propagatorCount Prelude.+ 1
         , propagators = HashMap.insert x PropagatorS { monotoneVars = m
                                                      , antimonotoneVars = a
                                                      } propagators
@@ -441,7 +437,7 @@ newFlag :: Monad m => FDT s m (Flag s)
 newFlag = do
   s@S {..} <- get
   let flag = Flag flagCount
-  put s { flagCount = flagCount + 1
+  put s { flagCount = flagCount Prelude.+ 1
         , unmarkedFlags = HashSet.insert flag unmarkedFlags
         }
   return flag

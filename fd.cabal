@@ -23,6 +23,7 @@ library
   default-language: Haskell98
   hs-source-dirs: src
   exposed-modules:
+    Control.Monad.FD
     Control.Monad.FD.Internal
   other-modules:
     Control.Monad.FD.Internal.DList
