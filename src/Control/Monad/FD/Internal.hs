@@ -18,6 +18,7 @@ module Control.Monad.FD.Internal
        , Sum ((+), (-), negate)
        , Product ((*))
        , Quotient (quot, div)
+       , fromInt
        , min
        , max
        , Range
@@ -184,6 +185,9 @@ instance Product (Term s) Int (Term s) where
 instance Quotient (Term s) Int where
   quot = Quot
   div = Div
+
+fromInt :: Int -> Term s
+fromInt = Int
 
 min :: Var s -> Term s
 min = Min

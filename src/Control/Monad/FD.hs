@@ -26,17 +26,17 @@ module Control.Monad.FD
 import Control.Applicative
 import Control.Monad (liftM, liftM2)
 
-import Data.HashMap.Lazy (HashMap)
-import qualified Data.HashMap.Lazy as HashMap
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HashMap
 import Data.Monoid (mempty)
 
 import Prelude hiding (Num (..), div, fromIntegral, max, min, quot)
 
-import Control.Monad.FD.Internal hiding (Term, label, max, min)
+import Control.Monad.FD.Internal hiding (Term, fromInt, label, max, min)
 import qualified Control.Monad.FD.Internal as Internal
 import Control.Monad.FD.Internal.Int
 
-data Term s = Term (HashMap (Var s) Int) Int
+data Term s = Term !(HashMap (Var s) Int) !Int
 
 freshTerm :: Monad m => FDT s m (Term s)
 freshTerm = liftM fromVar freshVar
@@ -77,13 +77,13 @@ Term x1 c1 #= Term x2 c2 = tell $ i1 ++ i2
          | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
          , let c = fromIntegral $ c2 -! c1
          , (x, a) <- HashMap.toList x1
-         , let (min, max) = interval (HashMap.delete x xs) c a
+         , let (min, max) = range (HashMap.delete x xs) c a
          ]
     i2 = [ x `in'` min #.. max
          | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
          , let c = fromIntegral $ c1 -! c2
          , (x, a) <- HashMap.toList x2
-         , let (min, max) = interval (HashMap.delete x xs) c a
+         , let (min, max) = range (HashMap.delete x xs) c a
          ]
 
 a #< b = a + 1 #<= b
@@ -94,7 +94,7 @@ Term x1 c1 #<= Term x2 c2 = tell $ i1 ++ i2
          | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
          , let c = fromIntegral $ c2 -! c1
          , (x, a) <- HashMap.toList x1
-         , let (min, max) = interval (HashMap.delete x xs) c a
+         , let (min, max) = range (HashMap.delete x xs) c a
          , let (min', max') | a >= 0 = (minBound, max)
                             | otherwise = (min, maxBound)
          ]
@@ -102,7 +102,7 @@ Term x1 c1 #<= Term x2 c2 = tell $ i1 ++ i2
          | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
          , let c = fromIntegral $ c1 -! c2
          , (x, a) <- HashMap.toList x2
-         , let (min, max) = interval (HashMap.delete x xs) c a
+         , let (min, max) = range (HashMap.delete x xs) c a
          , let (min', max') | a >= 0 = (min, maxBound)
                             | otherwise = (minBound, max)
          ]
@@ -111,31 +111,33 @@ Term x1 c1 #<= Term x2 c2 = tell $ i1 ++ i2
 
 (#>=) = flip (#<=)
 
-interval :: HashMap (Var s) Int -> Int -> Int ->
-            (Internal.Term s, Internal.Term s)
-interval x c a
-  | a >= 0 = (minTerm', maxTerm')
-  | otherwise = (maxTerm', minTerm')
+range :: HashMap (Var s) Int -> Int -> Int -> (Internal.Term s, Internal.Term s)
+range x c a = (min `div'` a, max `div` a)
   where
-    minTerm' = minTerm `quot` a
-    maxTerm' = maxTerm `quot` a
-    Interval {..} = HashMap.foldlWithKey' f (Interval c' c') x
-    f i@(Interval min max) k v = case compare v 0 of
-      GT -> Interval (min + v * Internal.min k) (max + v * Internal.max k)
+    (min, max) | a >= 0 = (minTerm, maxTerm)
+               | otherwise = (maxTerm, minTerm)
+      where
+        Range {..} = HashMap.foldlWithKey' f (Range c' c') x
+    f i@Range {..} k v = case compare v 0 of
+      GT -> Range (minTerm + v * Internal.min k) (maxTerm + v * Internal.max k)
       EQ -> i
-      LT -> Interval (min + v * Internal.max k) (max + v * Internal.min k)
+      LT -> Range (minTerm + v * Internal.max k) (maxTerm + v * Internal.min k)
     c' = fromIntegral c
 
-data Interval s =
-  Interval { minTerm :: !(Internal.Term s)
-           , maxTerm :: !(Internal.Term s)
-           }
+data Range s =
+  Range { minTerm :: !(Internal.Term s)
+        , maxTerm :: !(Internal.Term s)
+        }
 
 label :: Monad m => Term s -> FDT s m Int
 label (Term x y) =
   HashMap.foldlWithKey' f (return $ fromIntegral y) x
   where
     f a k v = liftM2 (+) a (liftM (v *) $ Internal.label k)
+
+infixl 7 `div'`
+div' :: Internal.Term s -> Int -> Internal.Term s
+div' a b = (a + Internal.fromInt (b - 1)) `div` b
 
 fromIntegral :: (Integral a, IsInteger b) => a -> b
 fromIntegral = fromInteger . toInteger
