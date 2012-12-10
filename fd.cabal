@@ -44,10 +44,12 @@ library
     KindSignatures,
     MultiParamTypeClasses
     Rank2Types,
+    RebindableSyntax,
     RecordWildCards
   if impl(ghc)
     other-extensions: MagicHash, UnboxedTuples
   if flag(integer-gmp)
     build-depends: integer-gmp
+    other-extensions: MagicHash, UnboxedTuples
     cpp-options: -DPACKAGE_integer_gmp
   ghc-options: -Wall

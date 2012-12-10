@@ -1,5 +1,6 @@
 {-# LANGUAGE
     MultiParamTypeClasses
+  , RebindableSyntax
   , RecordWildCards #-}
 module Control.Monad.FD
        ( FD
@@ -61,72 +62,68 @@ instance Sum (Term s) (Term s) where
   negate (Term x y) =
     Term (negate <$> x) (negate y)
 
-instance Product Int (Term s) where
-  a * Term x y = Term ((a *!) <$> x) (a *! y)
+instance Product Int (Term s) (Term s) where
+  a * Term x c = Term ((a *!) <$> x) (a *! c)
+
+instance Product (Term s) Int (Term s) where
+  Term x c * a = Term ((*! a) <$> x) (c *! a)
 
 infix 4 #=, #<, #<=, #>, #>=
 (#=), (#<), (#<=), (#>), (#>=) :: Monad m => Term s -> Term s -> FDT s m ()
 
-Term x1 y1 #= Term x2 y2 = tell $ i1 ++ i2
+Term x1 c1 #= Term x2 c2 = tell $ i1 ++ i2
   where
-    i1 = for (HashMap.toList x1) $ \ (k, v) ->
-      let x' = HashMap.delete k x
-          (min, max) = extrema x' y v
-      in k `in'` min :.. max
-      where
-        x = HashMap.unionWith (+) x2 (negate <$> x1)
-        y = fromIntegral $ y2 -! y1
-    i2 = for (HashMap.toList x2) $ \ (k, v) ->
-      let x' = HashMap.delete k x
-          (min, max) = extrema x' y v
-      in k `in'` min :.. max
-      where
-        x = HashMap.unionWith (+) x1 (negate <$> x2)
-        y = fromIntegral $ y1 -! y2
+    i1 = [ x `in'` min #.. max
+         | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
+         , let c = fromIntegral $ c2 -! c1
+         , (x, a) <- HashMap.toList x1
+         , let (min, max) = interval (HashMap.delete x xs) c a
+         ]
+    i2 = [ x `in'` min #.. max
+         | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
+         , let c = fromIntegral $ c1 -! c2
+         , (x, a) <- HashMap.toList x2
+         , let (min, max) = interval (HashMap.delete x xs) c a
+         ]
 
-Term x1 y1 #>= Term x2 y2 = tell $ i1 ++ i2
+a #< b = a + 1 #<= b
+
+Term x1 c1 #<= Term x2 c2 = tell $ i1 ++ i2
   where
-    i1 = for (HashMap.toList x1) $ \ (k, v) ->
-      let x' = HashMap.delete k x
-          (min, max) = extrema x' y v
-          (min', max')
-            | v >= 0 = (min, maxBound)
-            | otherwise = (minBound, max)
-      in k `in'` min' :.. max'
-      where
-        x = HashMap.unionWith (+) x2 (negate <$> x1)
-        y = fromIntegral $ y2 -! y1
-    i2 = for (HashMap.toList x2) $ \ (k, v) ->
-      let x' = HashMap.delete k x
-          (min, max) = extrema x' y v
-          (min', max')
-            | v >= 0 = (minBound, max)
-            | otherwise = (min, maxBound)
-      in k `in'` min' :.. max'
-      where
-        x = HashMap.unionWith (+) x1 (negate <$> x2)
-        y = fromIntegral $ y1 -! y2
+    i1 = [ x `in'` min' #.. max'
+         | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
+         , let c = fromIntegral $ c2 -! c1
+         , (x, a) <- HashMap.toList x1
+         , let (min, max) = interval (HashMap.delete x xs) c a
+         , let (min', max') | a >= 0 = (minBound, max)
+                            | otherwise = (min, maxBound)
+         ]
+    i2 = [ x `in'` min' #.. max'
+         | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
+         , let c = fromIntegral $ c1 -! c2
+         , (x, a) <- HashMap.toList x2
+         , let (min, max) = interval (HashMap.delete x xs) c a
+         , let (min', max') | a >= 0 = (min, maxBound)
+                            | otherwise = (minBound, max)
+         ]
 
-a #> b = a #>= b + fromInteger 1
+(#>) = flip (#<)
 
-(#<=) = flip (#>=)
+(#>=) = flip (#<=)
 
-a #< b = a + fromInteger 1 #<= b
-
-extrema :: HashMap (Var s) Int -> Int -> Int ->
-           (Internal.Term s, Internal.Term s)
-extrema x c q
-  | q >= 0 = (minTerm', maxTerm')
+interval :: HashMap (Var s) Int -> Int -> Int ->
+            (Internal.Term s, Internal.Term s)
+interval x c a
+  | a >= 0 = (minTerm', maxTerm')
   | otherwise = (maxTerm', minTerm')
   where
-    minTerm' = minTerm `quot` q
-    maxTerm' = maxTerm `quot` q
-    Interval {..} = HashMap.foldlWithKey' f a x
+    minTerm' = minTerm `quot` a
+    maxTerm' = maxTerm `quot` a
+    Interval {..} = HashMap.foldlWithKey' f (Interval c' c') x
     f i@(Interval min max) k v = case compare v 0 of
       GT -> Interval (min + v * Internal.min k) (max + v * Internal.max k)
       EQ -> i
       LT -> Interval (min + v * Internal.max k) (max + v * Internal.min k)
-    a = Interval { minTerm = c', maxTerm = c' }
     c' = fromIntegral c
 
 data Interval s =
@@ -142,6 +139,3 @@ label (Term x y) =
 
 fromIntegral :: (Integral a, IsInteger b) => a -> b
 fromIntegral = fromInteger . toInteger
-
-for :: [a] -> (a -> b) -> [b]
-for = flip map

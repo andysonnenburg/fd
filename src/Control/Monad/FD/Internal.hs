@@ -20,7 +20,8 @@ module Control.Monad.FD.Internal
        , Quotient (quot, div)
        , min
        , max
-       , Range ((:..))
+       , Range
+       , (#..)
        , dom
        , Indexical
        , in'
@@ -135,15 +136,15 @@ infixl 7 *, `quot`, `div`
 class IsInteger a where
   fromInteger :: Integer -> a
 
-class IsInteger b => Sum a b | a -> b where
+class Sum a b | a -> b where
   (+) :: a -> b -> a
   (-) :: a -> b -> a
   negate :: a -> a
 
-class (Sum a a, Sum b b) => Product a b | b -> a where
-  (*) :: a -> b -> b
+class Product a b c | a b -> c, a c -> b, b c -> a where
+  (*) :: a -> b -> c
 
-class Product b a => Quotient a b | a -> b where
+class (Product a b a, Product b a a) => Quotient a b | a -> b where
   quot :: a -> b -> a
   div :: a -> b -> a
 
@@ -155,7 +156,7 @@ instance Sum Int Int where
   (-) = (Prelude.-)
   negate = Prelude.negate
 
-instance Product Int Int where
+instance Product Int Int Int where
   (*) = (Prelude.*)
 
 instance Quotient Int Int where
@@ -174,8 +175,11 @@ instance Sum (Term s) (Term s) where
   (-) = (:-)
   negate = (Prelude.fromInteger (-1) :*)
 
-instance Product Int (Term s) where
+instance Product Int (Term s) (Term s) where
   (*) = (:*)
+
+instance Product (Term s) Int (Term s) where
+  (*) = flip (:*)
 
 instance Quotient (Term s) Int where
   quot = Quot
@@ -191,6 +195,9 @@ infix 5 :..
 data Range s
   = Term s :.. Term s
   | Dom (Var s)
+
+(#..) :: Term s -> Term s -> Range s
+(#..) = (:..)
 
 dom :: Var s -> Range s
 dom = Dom
