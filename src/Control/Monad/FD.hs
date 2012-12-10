@@ -9,10 +9,14 @@ module Control.Monad.FD
        , Term
        , freshTerm
        , fromVar
+       , fromInt
        , Sum ((+), (-), negate, fromInteger)
        , Product ((*))
        , Quotient (quot, div)
        , (#=)
+       , (#<)
+       , (#<=)
+       , (#>)
        , (#>=)
        , label
        ) where
@@ -29,6 +33,7 @@ import Prelude (abs)
 
 import Control.Monad.FD.Internal hiding (Term, label, max, min)
 import qualified Control.Monad.FD.Internal as Internal
+import Control.Monad.FD.Internal.Int
 
 data Term s = Term (HashMap (Var s) Int) Int
 
@@ -38,18 +43,25 @@ freshTerm = liftM fromVar freshVar
 fromVar :: Var s -> Term s
 fromVar = flip Term 0 . flip HashMap.singleton 1
 
+fromInt :: Int -> Term s
+fromInt = Term HashMap.empty
+
+instance Bounded (Term s) where
+  minBound = fromInt minBound
+  maxBound = fromInt maxBound
+
 instance Sum (Term s) where
   Term x1 y1 + Term x2 y2 =
-    Term (HashMap.unionWith (+) x1 x2) (y1 + y2)
+    Term (HashMap.unionWith (+!) x1 x2) (y1 +! y2)
   Term x1 y1 - Term x2 y2 =
-    Term (HashMap.unionWith (+) x1 (negate <$> x2)) (y1 - y2)
+    Term (HashMap.unionWith (+!) x1 (negate <$> x2)) (y1 -! y2)
   negate (Term x y) =
     Term (negate <$> x) (negate y)
   fromInteger =
     Term mempty . fromInteger
 
 instance Product Int (Term s) where
-  a * Term x y = Term ((a *) <$> x) (a * y)
+  a * Term x y = Term ((a *!) <$> x) (a *! y)
 
 infix 4 #=
 (#=) :: Monad m => Term s -> Term s -> FDT s m ()
@@ -61,16 +73,19 @@ Term x1 y1 #= Term x2 y2 = tell $ i1 ++ i2
       in k `in'` min :.. max
       where
         x = HashMap.unionWith (+) x2 (negate <$> x1)
-        y = fromIntegral $ y2 - y1
+        y = fromIntegral $ y2 -! y1
     i2 = for (HashMap.toList x2) $ \ (k, v) ->
       let x' = HashMap.delete k x
           (min, max) = extrema x' y v
       in k `in'` min :.. max
       where
         x = HashMap.unionWith (+) x1 (negate <$> x2)
-        y = fromIntegral $ y1 - y2
+        y = fromIntegral $ y1 -! y2
 
-(#>=) :: Monad m => Term s -> Term s -> FDT s m ()
+
+infix 4 #<, #<=, #>, #>=
+(#<), (#<=), (#>), (#>=) :: Monad m => Term s -> Term s -> FDT s m ()
+
 Term x1 y1 #>= Term x2 y2 = tell $ i1 ++ i2
   where
     i1 = for (HashMap.toList x1) $ \ (k, v) ->
@@ -82,7 +97,7 @@ Term x1 y1 #>= Term x2 y2 = tell $ i1 ++ i2
       in k `in'` min' :.. max'
       where
         x = HashMap.unionWith (+) x2 (negate <$> x1)
-        y = fromIntegral $ y2 - y1
+        y = fromIntegral $ y2 -! y1
     i2 = for (HashMap.toList x2) $ \ (k, v) ->
       let x' = HashMap.delete k x
           (min, max) = extrema x' y v
@@ -92,7 +107,13 @@ Term x1 y1 #>= Term x2 y2 = tell $ i1 ++ i2
       in k `in'` min' :.. max'
       where
         x = HashMap.unionWith (+) x1 (negate <$> x2)
-        y = fromIntegral $ y1 - y2
+        y = fromIntegral $ y1 -! y2
+
+a #> b = a #>= b + fromInteger 1
+
+(#<=) = flip (#>=)
+
+a #< b = a + fromInteger 1 #<= b
 
 extrema :: HashMap (Var s) Int -> Int -> Int ->
            (Internal.Term s, Internal.Term s)
