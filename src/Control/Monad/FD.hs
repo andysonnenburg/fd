@@ -118,13 +118,12 @@ range :: HashMap (Var s) Int -> Int -> Int -> Range s
 range x c a =
   (`div'` a) *** (`div` a) <<<
   whenA (a < 0) swap $
-  HashMap.foldlWithKey' f (c', c') x
+  HashMap.foldrWithKey f (pair $ fromIntegral c) x
   where
-    f r k v = case compare v 0 of
-      GT -> (fst r + v * Internal.min k, snd r + v * Internal.max k)
-      EQ -> r
-      LT -> (fst r + v * Internal.max k, snd r + v * Internal.min k)
-    c' = fromIntegral c
+    f k v = case compare v 0 of
+      GT -> (+ v * Internal.min k) *** (+ v * Internal.max k)
+      EQ -> id
+      LT -> (+ v * Internal.max k) *** (+ v * Internal.min k)
 
 label :: Monad m => Term s -> FDT s m Int
 label (Term x y) =
@@ -142,3 +141,6 @@ fromIntegral = fromInteger . toInteger
 whenA :: Arrow a => Bool -> a b b -> a b b
 whenA True a = a
 whenA False _ = arr id
+
+pair :: a -> (a, a)
+pair a = (a, a)
