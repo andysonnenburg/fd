@@ -1,7 +1,6 @@
 {-# LANGUAGE
     MultiParamTypeClasses
-  , RebindableSyntax
-  , RecordWildCards #-}
+  , RebindableSyntax #-}
 module Control.Monad.FD
        ( FD
        , runFD
@@ -29,10 +28,11 @@ import Control.Monad (liftM, liftM2)
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
 import Data.Monoid (mempty)
+import Data.Tuple (swap)
 
 import Prelude hiding (Num (..), div, fromIntegral, max, min, quot)
 
-import Control.Monad.FD.Internal hiding (Term, fromInt, label, max, min)
+import Control.Monad.FD.Internal hiding (Range, Term, fromInt, label, max, min)
 import qualified Control.Monad.FD.Internal as Internal
 import Control.Monad.FD.Internal.Int
 
@@ -71,69 +71,66 @@ instance Product (Term s) Int (Term s) where
 infix 4 #=, #<, #<=, #>, #>=
 (#=), (#<), (#<=), (#>), (#>=) :: Monad m => Term s -> Term s -> FDT s m ()
 
-Term x1 c1 #= Term x2 c2 = tell $ i1 ++ i2
-  where
-    i1 = [ x `in'` min #.. max
-         | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
-         , let c = fromIntegral $ c2 -! c1
-         , (x, a) <- HashMap.toList x1
-         , let (min, max) = range (HashMap.delete x xs) c a
-         ]
-    i2 = [ x `in'` min #.. max
-         | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
-         , let c = fromIntegral $ c1 -! c2
-         , (x, a) <- HashMap.toList x2
-         , let (min, max) = range (HashMap.delete x xs) c a
-         ]
+Term x1 c1 #= Term x2 c2 =
+  tell $
+  [ x `in'` min #.. max
+  | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
+        c = fromIntegral $ c2 -! c1
+  , (x, a) <- HashMap.toList x1
+  , let (min, max) = range (HashMap.delete x xs) c a
+  ] ++
+  [ x `in'` min #.. max
+  | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
+        c = fromIntegral $ c1 -! c2
+  , (x, a) <- HashMap.toList x2
+  , let (min, max) = range (HashMap.delete x xs) c a
+  ]
 
 a #< b = a + 1 #<= b
 
-Term x1 c1 #<= Term x2 c2 = tell $ i1 ++ i2
-  where
-    i1 = [ x `in'` min' #.. max'
-         | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
-         , let c = fromIntegral $ c2 -! c1
-         , (x, a) <- HashMap.toList x1
-         , let (min, max) = range (HashMap.delete x xs) c a
-         , let (min', max') | a >= 0 = (minBound, max)
-                            | otherwise = (min, maxBound)
-         ]
-    i2 = [ x `in'` min' #.. max'
-         | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
-         , let c = fromIntegral $ c1 -! c2
-         , (x, a) <- HashMap.toList x2
-         , let (min, max) = range (HashMap.delete x xs) c a
-         , let (min', max') | a >= 0 = (min, maxBound)
-                            | otherwise = (minBound, max)
-         ]
+Term x1 c1 #<= Term x2 c2 =
+  tell $
+  [ x `in'` min #.. max
+  | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
+        c = fromIntegral $ c2 -! c1
+  , (x, a) <- HashMap.toList x1
+  , let r = range (HashMap.delete x xs) c a
+        (min, max) | a >= 0 = (minBound, snd r)
+                   | otherwise = (fst r, maxBound)
+  ] ++
+  [ x `in'` min #.. max
+  | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
+        c = fromIntegral $ c1 -! c2
+  , (x, a) <- HashMap.toList x2
+  , let r = range (HashMap.delete x xs) c a
+        (min, max) | a >= 0 = (fst r, maxBound)
+                   | otherwise = (minBound, snd r)
+  ]
 
 (#>) = flip (#<)
 
 (#>=) = flip (#<=)
 
-range :: HashMap (Var s) Int -> Int -> Int -> (Internal.Term s, Internal.Term s)
+type Range s = (Internal.Term s, Internal.Term s)
+
+range :: HashMap (Var s) Int -> Int -> Int -> Range s
 range x c a = (min `div'` a, max `div` a)
   where
-    (min, max) | a >= 0 = (minTerm, maxTerm)
-               | otherwise = (maxTerm, minTerm)
+    (min, max) | a >= 0 = r
+               | otherwise = swap r
       where
-        Range {..} = HashMap.foldlWithKey' f (Range c' c') x
-    f r@Range {..} k v = case compare v 0 of
-      GT -> Range (minTerm + v * Internal.min k) (maxTerm + v * Internal.max k)
+        r = HashMap.foldlWithKey' f (c', c') x
+    f r k v = case compare v 0 of
+      GT -> (fst r + v * Internal.min k, snd r + v * Internal.max k)
       EQ -> r
-      LT -> Range (minTerm + v * Internal.max k) (maxTerm + v * Internal.min k)
+      LT -> (fst r + v * Internal.max k, snd r + v * Internal.min k)
     c' = fromIntegral c
-
-data Range s =
-  Range { minTerm :: !(Internal.Term s)
-        , maxTerm :: !(Internal.Term s)
-        }
 
 label :: Monad m => Term s -> FDT s m Int
 label (Term x y) =
   HashMap.foldlWithKey' f (return $ fromIntegral y) x
   where
-    f a k v = liftM2 (+) a (liftM (v *) $ Internal.label k)
+    f a k v = liftM2 (+) a $ liftM (v *) $ Internal.label k
 
 infixl 7 `div'`
 div' :: Internal.Term s -> Int -> Internal.Term s
