@@ -117,7 +117,7 @@ type Range s = (Internal.Term s, Internal.Term s)
 range :: HashMap (Var s) Int -> Int -> Int -> Range s
 range x c a =
   (`div'` a) *** (`div` a) <<<
-  if' (a >= 0) id swap $
+  whenA (a < 0) swap $
   HashMap.foldlWithKey' f (c', c') x
   where
     f r k v = case compare v 0 of
@@ -139,6 +139,6 @@ div' a b = (a + Internal.fromInt (b - 1)) `div` b
 fromIntegral :: (Integral a, IsInteger b) => a -> b
 fromIntegral = fromInteger . toInteger
 
-if' :: Bool -> a -> a -> a
-if' True a _ = a
-if' False _ a = a
+whenA :: Arrow a => Bool -> a b b -> a b b
+whenA True a = a
+whenA False _ = arr id
