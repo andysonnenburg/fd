@@ -23,6 +23,7 @@ module Control.Monad.FD
        ) where
 
 import Control.Applicative
+import Control.Arrow
 import Control.Monad (liftM, liftM2)
 
 import Data.HashMap.Strict (HashMap)
@@ -114,12 +115,11 @@ Term x1 c1 #<= Term x2 c2 =
 type Range s = (Internal.Term s, Internal.Term s)
 
 range :: HashMap (Var s) Int -> Int -> Int -> Range s
-range x c a = (min `div'` a, max `div` a)
+range x c a =
+  (`div'` a) *** (`div` a) <<<
+  if' (a >= 0) id swap $
+  HashMap.foldlWithKey' f (c', c') x
   where
-    (min, max) | a >= 0 = r
-               | otherwise = swap r
-      where
-        r = HashMap.foldlWithKey' f (c', c') x
     f r k v = case compare v 0 of
       GT -> (fst r + v * Internal.min k, snd r + v * Internal.max k)
       EQ -> r
@@ -138,3 +138,7 @@ div' a b = (a + Internal.fromInt (b - 1)) `div` b
 
 fromIntegral :: (Integral a, IsInteger b) => a -> b
 fromIntegral = fromInteger . toInteger
+
+if' :: Bool -> a -> a -> a
+if' True a _ = a
+if' False _ a = a
