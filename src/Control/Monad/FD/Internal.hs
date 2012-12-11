@@ -271,8 +271,11 @@ label :: Monad m => Var s -> FDT s m Int
 label x = do
   dom' <- readDomain x
   case Dom.toList dom' of
+    [] -> mzero
     [i] -> return i
-    is -> msum $ for is $ \ i -> do
+    (i:j:is) -> assignTo i `mplus` assignTo j `mplus` msum (map assignTo is)
+  where
+    assignTo i = do
       writeDomain x $ Dom.singleton i
       pruned x Pruning.val
       return i
@@ -504,6 +507,3 @@ gets = FDT . State.gets
 
 whenNothing :: Monad m => Maybe a -> m () -> m ()
 whenNothing p m = maybe m (const $ return ()) p
-
-for :: [a] -> (a -> b) -> [b]
-for = flip map

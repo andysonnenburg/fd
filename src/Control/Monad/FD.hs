@@ -118,9 +118,9 @@ range x c a = (min `div'` a, max `div` a)
                | otherwise = (maxTerm, minTerm)
       where
         Range {..} = HashMap.foldlWithKey' f (Range c' c') x
-    f i@Range {..} k v = case compare v 0 of
+    f r@Range {..} k v = case compare v 0 of
       GT -> Range (minTerm + v * Internal.min k) (maxTerm + v * Internal.max k)
-      EQ -> i
+      EQ -> r
       LT -> Range (minTerm + v * Internal.max k) (maxTerm + v * Internal.min k)
     c' = fromIntegral c
 
