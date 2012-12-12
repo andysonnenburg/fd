@@ -113,8 +113,11 @@ Term x1 c1 #<= Term x2 c2 =
 (#>=) = flip (#<=)
 
 type Range s = (Internal.Term s, Internal.Term s)
+type Factor = Int
+type Addend = Int
+type Divisor = Int
 
-range :: HashMap (Var s) Int -> Int -> Int -> Range s
+range :: HashMap (Var s) Factor -> Addend -> Divisor -> Range s
 range x c a =
   (`div'` a) *** (`div` a) <<<
   whenA (a < 0) swap $

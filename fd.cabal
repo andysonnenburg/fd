@@ -53,3 +53,11 @@ library
     other-extensions: MagicHash, UnboxedTuples
     cpp-options: -DPACKAGE_integer_gmp
   ghc-options: -Wall
+
+benchmark eq10
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  hs-source-dirs: benchmarks
+  main-is: eq10.hs
+  build-depends: base, array, criterion, fd
+  ghc-options: -Wall -O2
