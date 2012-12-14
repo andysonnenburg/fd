@@ -1,6 +1,8 @@
 module Control.Monad.FD.Internal.Pruning
-       ( Pruning, join, affectedBy, dom, min, max, val
+       ( Pruning, affectedBy, dom, min, max, val
        ) where
+
+import Data.Semigroup (Semigroup ((<>)))
 
 import Prelude hiding (max, min)
 
@@ -11,18 +13,18 @@ data Pruning
   | MinMax
   | Val
 
-join :: Pruning -> Pruning -> Pruning
-join Val _ = Val
-join _ Val = Val
-join MinMax _ = MinMax
-join _ MinMax = MinMax
-join Min Max = MinMax
-join Max Min = MinMax
-join Min _ = Min
-join _ Min = Min
-join Max _ = Max
-join _ Max = Max
-join Dom Dom = Dom
+instance Semigroup Pruning where
+  Val <> _ = Val
+  _ <> Val = Val
+  MinMax <> _ = MinMax
+  _ <> MinMax = MinMax
+  Min <> Max = MinMax
+  Max <> Min = MinMax
+  Min <> _ = Min
+  _ <> Min = Min
+  Max <> _ = Max
+  _ <> Max = Max
+  Dom <> Dom = Dom
 
 affectedBy :: Pruning -> Pruning -> Bool
 _ `affectedBy` Val = True

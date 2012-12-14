@@ -47,17 +47,18 @@ import Data.Foldable (forM_, toList)
 import Data.Function (on)
 import Data.Functor.Identity
 import Data.Hashable
+import qualified Data.HashMap.Strict as StrictHashMap
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
-import Data.Monoid ((<>), mempty)
+import Data.Monoid (mappend, mempty)
+import Data.Semigroup ((<>))
+import Data.Sequence (Seq, (|>))
 import Data.Tuple (swap)
 
 import Prelude hiding (Fractional (..), Integral (..), Num (..), min, max)
 import Prelude (toInteger)
 import qualified Prelude
 
-import Control.Monad.FD.Internal.DList (DList)
-import qualified Control.Monad.FD.Internal.DList as DList
 import Control.Monad.FD.Internal.Dom (Dom)
 import qualified Control.Monad.FD.Internal.Dom as Dom
 import Control.Monad.FD.Internal.HashMap.Lazy (HashMap, (!))
@@ -291,11 +292,11 @@ getConditionalTermVars t = case t of
   t1 :+ t2 -> do
     (s1, g1) <- getConditionalTermVars t1
     (s2, g2) <- getConditionalTermVars t2
-    return (s1 <> s2, g1 <> g2)
+    return (s1 `mappend` s2, g1 `mappend` g2)
   t1 :- t2 -> do
     (s1, g1) <- getConditionalTermVars t1
     (s2, g2) <- getConditionalTermVars t2
-    return (s1 <> g2, g1 <> s2)
+    return (s1 `mappend` g2, g1 `mappend` s2)
   x :* t'
     | x >= 0 -> getConditionalTermVars t'
     | otherwise -> liftM swap $ getConditionalTermVars t'
@@ -317,7 +318,7 @@ getConditionalRangeVars r = case r of
   t1 :.. t2 -> do
     (s1, g1) <- getConditionalTermVars t1
     (s2, g2) <- getConditionalTermVars t2
-    return (g1 <> s2, s1 <> g2)
+    return (g1 `mappend` s2, s1 `mappend` g2)
   Dom x -> do
     determined <- isDetermined x
     return (mempty, if determined then mempty else HashSet.singleton x)
@@ -328,8 +329,8 @@ isDetermined = liftM Dom.isVal . readDomain
 termVars :: Term s -> HashMap (Var s) Pruning
 termVars t = case t of
   Int _ -> HashMap.empty
-  t1 :+ t2 -> (HashMap.unionWith Pruning.join `on` termVars) t1 t2
-  t1 :- t2 -> (HashMap.unionWith Pruning.join `on` termVars) t1 t2
+  t1 :+ t2 -> (HashMap.unionWith (<>) `on` termVars) t1 t2
+  t1 :- t2 -> (HashMap.unionWith (<>) `on` termVars) t1 t2
   _ :* t' -> termVars t'
   t' `Quot` _ -> termVars t'
   t' `Div` _ -> termVars t'
@@ -338,26 +339,17 @@ termVars t = case t of
 
 rangeVars :: Range s -> HashMap (Var s) Pruning
 rangeVars r = case r of
-  t1 :.. t2 -> (HashMap.unionWith Pruning.join `on` termVars) t1 t2
+  t1 :.. t2 -> (HashMap.unionWith (<>) `on` termVars) t1 t2
   Dom x -> HashMap.singleton x Pruning.dom
 
 pruneDom :: Monad m => Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 pruneDom (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
-  return $ Dom.deleteLT i1 `then'` Dom.deleteGT i2 $ dom'
-pruneDom (Dom x) dom' =
-  undefined
-
-then' :: (a -> Maybe (a, Pruning)) ->
-         (a -> Maybe (a, Pruning)) ->
-         a -> Maybe (a, Pruning)
-then' f g a =
-  case f a of
-    Nothing -> g a
-    m@(Just (a', p)) -> case g a' of
-      Nothing -> m
-      Just (a'', p') -> Just (a'', Pruning.join p p')
+  return $ Dom.retainAll (Dom.fromBounds i1 i2) dom'
+pruneDom (Dom x) dom' = do
+  dom'' <- readDomain x
+  return $ Dom.retainAll dom'' dom'
 
 pruned :: Monad m => Var s -> Pruning -> FDT s m ()
 pruned x pruning = readListeners x >>= mapM_ ($ pruning) . toList
@@ -376,8 +368,8 @@ getVal t = case t of
   Max x -> liftM Dom.findMax $ readDomain x
 
 data VarS s m =
-  VarS { domain :: Dom
-       , listeners :: DList (Listener s m)
+  VarS { domain :: !Dom
+       , listeners :: Seq (Listener s m)
        }
 
 type Listener s m = Pruning -> FDT s m ()
@@ -394,17 +386,18 @@ readDomain :: Monad m => Var s -> FDT s m Dom
 readDomain = liftM domain . readVar
 
 modifyVar :: Monad m => Var s -> (VarS s m -> VarS s m) -> FDT s m ()
-modifyVar x f = modify $ \ s@S {..} -> s { vars = HashMap.adjust f x vars }
+modifyVar x f = modify $ \ s@S {..} ->
+  s { vars = StrictHashMap.adjust f x vars }
 
 writeDomain :: Monad m => Var s -> Dom -> FDT s m ()
 writeDomain x d = modifyVar x $ \ s@VarS {..} -> s { domain = d }
 
-readListeners :: Monad m => Var s -> FDT s m (DList (Listener s m))
+readListeners :: Monad m => Var s -> FDT s m (Seq (Listener s m))
 readListeners = liftM listeners . readVar
 
 whenPruned :: Monad m => Var s -> (Pruning -> FDT s m ()) -> FDT s m ()
 whenPruned x listener = modifyVar x $ \ s@VarS {..} ->
-  s { listeners = DList.snoc listeners listener }
+  s { listeners = listeners |> listener }
 
 newtype Propagator (s :: Region) =
   Propagator { unwrapPropagator :: Integer

@@ -26,11 +26,9 @@ library
     Control.Monad.FD
     Control.Monad.FD.Internal
   other-modules:
-    Control.Monad.FD.Internal.DList
     Control.Monad.FD.Internal.Dom
     Control.Monad.FD.Internal.HashMap.Lazy
     Control.Monad.FD.Internal.Int
-    Control.Monad.FD.Internal.IntMap.Lazy
     Control.Monad.FD.Internal.Pruning
   build-depends:
     base >= 4 && < 5,
@@ -38,7 +36,8 @@ library
     logict,
     containers,
     hashable,
-    unordered-containers
+    unordered-containers,
+    semigroups
   other-extensions:
     EmptyDataDecls,
     FunctionalDependencies,
