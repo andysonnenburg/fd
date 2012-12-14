@@ -11,13 +11,13 @@ module Control.Monad.FD.Internal
        , runFD
        , FDT
        , runFDT
+       , Additive (..)
+       , Multiplicative (..)
+       , Integral (..)
+       , Fractional (..)
        , Var
        , freshVar
        , Term
-       , IsInteger (fromInteger)
-       , Sum ((+), (-), negate)
-       , Product ((*))
-       , Quotient (quot, div)
        , fromInt
        , min
        , max
@@ -52,7 +52,8 @@ import qualified Data.HashSet as HashSet
 import Data.Monoid ((<>), mempty)
 import Data.Tuple (swap)
 
-import Prelude hiding (Num (..), div, min, max, quot)
+import Prelude hiding (Fractional (..), Integral (..), Num (..), min, max)
+import Prelude (toInteger)
 import qualified Prelude
 
 import Control.Monad.FD.Internal.DList (DList)
@@ -104,6 +105,42 @@ instance MonadTrans (FDT s) where
 instance MonadIO m => MonadIO (FDT s m) where
   liftIO = lift . liftIO
 
+infixl 6 +, -
+infixl 7 *, `quot`, `div`
+
+class Additive a where
+  (+) :: a -> a -> a
+  (-) :: a -> a -> a
+  a - b = a + negate b
+  negate :: a -> a
+  negate = (fromInteger 0 -)
+  fromInteger :: Integer -> a
+
+class Multiplicative a b c | a b -> c, a c -> b, b c -> a where
+  (*) :: a -> b -> c
+
+class ( Multiplicative a b a
+      , Multiplicative b a a
+      ) => Integral a b where
+  quot :: a -> b -> a
+  div :: a -> b -> a
+
+class Multiplicative a b c => Fractional a b c where
+  (/) :: a -> b -> c
+
+instance Additive Int where
+  (+) = (Prelude.+)
+  (-) = (Prelude.-)
+  negate = Prelude.negate
+  fromInteger = Prelude.fromInteger
+
+instance Multiplicative Int Int Int where
+  (*) = (Prelude.*)
+
+instance Integral Int Int where
+  quot = Prelude.quot
+  div = Prelude.div
+
 newtype Var (s :: Region) = Var { unwrapVar :: Integer } deriving Eq
 
 instance Hashable (Var s) where
@@ -131,58 +168,23 @@ data Term s
   | Min (Var s)
   | Max (Var s)
 
-infixl 6 +, -
-infixl 7 *, `quot`, `div`
-
-class IsInteger a where
-  fromInteger :: Integer -> a
-
-class Sum a b | a -> b where
-  (+) :: a -> b -> a
-  (-) :: a -> b -> a
-  negate :: a -> a
-
-class Product a b c | a b -> c, a c -> b, b c -> a where
-  (*) :: a -> b -> c
-
-class (Product a b a, Product b a a) => Quotient a b | a -> b where
-  quot :: a -> b -> a
-  div :: a -> b -> a
-
-instance IsInteger Int where
-  fromInteger = Prelude.fromInteger
-
-instance Sum Int Int where
-  (+) = (Prelude.+)
-  (-) = (Prelude.-)
-  negate = Prelude.negate
-
-instance Product Int Int Int where
-  (*) = (Prelude.*)
-
-instance Quotient Int Int where
-  quot = Prelude.quot
-  div = Prelude.div
-
 instance Bounded (Term s) where
   minBound = Int minBound
   maxBound = Int maxBound
 
-instance IsInteger (Term s) where
-  fromInteger = Int . fromInteger
-
-instance Sum (Term s) (Term s) where
+instance Additive (Term s) where
   (+) = (:+)
   (-) = (:-)
-  negate = (Prelude.fromInteger (-1) :*)
+  negate = ((-1) :*)
+  fromInteger = Int . fromInteger
 
-instance Product Int (Term s) (Term s) where
+instance Multiplicative Int (Term s) (Term s) where
   (*) = (:*)
 
-instance Product (Term s) Int (Term s) where
+instance Multiplicative (Term s) Int (Term s) where
   (*) = flip (:*)
 
-instance Quotient (Term s) Int where
+instance Integral (Term s) Int where
   quot = Quot
   div = Div
 
@@ -229,7 +231,7 @@ tell is = do
             pruned x pruning)
       (False, True) ->
         readDomain x >>= pruneDom r >>=
-        flip whenNothing (addPropagator x r m a entailed)
+        flip unlessNothing (addPropagator x r m a entailed)
       (False, False) ->
         addPropagator x r m a entailed
 
@@ -321,7 +323,7 @@ getConditionalRangeVars r = case r of
     return (mempty, if determined then mempty else HashSet.singleton x)
 
 isDetermined :: Monad m => Var s -> FDT s m Bool
-isDetermined = liftM (Dom.sizeLE 1) . readDomain
+isDetermined = liftM Dom.isVal . readDomain
 
 termVars :: Term s -> HashMap (Var s) Pruning
 termVars t = case t of
@@ -343,9 +345,19 @@ pruneDom :: Monad m => Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 pruneDom (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
-  return $ Dom.intersection dom' (Dom.fromBounds i1 i2)
+  return $ Dom.deleteLT i1 `then'` Dom.deleteGT i2 $ dom'
 pruneDom (Dom x) dom' =
-  liftM (Dom.intersection dom') $ readDomain x
+  undefined
+
+then' :: (a -> Maybe (a, Pruning)) ->
+         (a -> Maybe (a, Pruning)) ->
+         a -> Maybe (a, Pruning)
+then' f g a =
+  case f a of
+    Nothing -> g a
+    m@(Just (a', p)) -> case g a' of
+      Nothing -> m
+      Just (a'', p') -> Just (a'', Pruning.join p p')
 
 pruned :: Monad m => Var s -> Pruning -> FDT s m ()
 pruned x pruning = readListeners x >>= mapM_ ($ pruning) . toList
@@ -507,3 +519,6 @@ gets = FDT . State.gets
 
 whenNothing :: Monad m => Maybe a -> m () -> m ()
 whenNothing p m = maybe m (const $ return ()) p
+
+unlessNothing :: Monad m => Maybe a -> m () -> m ()
+unlessNothing p m = maybe (return ()) (const m) p

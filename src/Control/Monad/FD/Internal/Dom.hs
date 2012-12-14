@@ -7,73 +7,86 @@ module Control.Monad.FD.Internal.Dom
        , toList
        , deleteLT
        , deleteGT
-       , intersection
        , findMin
        , findMax
        , singleton
-       , sizeLE
+       , isVal
        ) where
+
+import Data.Ix (range)
+import Data.Monoid (mempty)
 
 import Prelude hiding (max, min, null)
 import qualified Prelude
 
 import Control.Monad.FD.Internal.Pruning (Pruning)
 import qualified Control.Monad.FD.Internal.Pruning as Pruning
+import Control.Monad.FD.Internal.IntMap.Lazy (IntMap)
+import qualified Control.Monad.FD.Internal.IntMap.Lazy as IntMap
 
-data Dom = Bounds Int Int
+newtype Dom = Dom { getDom :: IntMap Int }
 
 fromBounds :: Int -> Int -> Dom
-fromBounds = Bounds
+fromBounds min max = Dom $ IntMap.singleton min max
 
 full :: Dom
-full = Bounds minBound maxBound
+full = fromBounds minBound maxBound
 
 empty :: Dom
-empty = Bounds maxBound minBound
+empty = Dom mempty
 
 null :: Dom -> Bool
-null (Bounds min max) = min > max
+null = IntMap.null . getDom
 
 toList :: Dom -> [Int]
-toList (Bounds min max) = [min .. max]
+toList = concatMap range . IntMap.toList . getDom
 
 deleteLT :: Int -> Dom -> Maybe (Dom, Pruning)
-deleteLT i (Bounds min max)
-  | i > max = Just (empty, Pruning.val)
-  | i > min = Just (Bounds i max, if i == max then Pruning.val else Pruning.min)
-  | otherwise = Nothing
+deleteLT i (Dom dom)
+  | IntMap.null dom = Nothing
+  | otherwise = case IntMap.lookupLT i dom of
+    Nothing -> Nothing -- i <= minimum
+    Just (min, max) -> case compare i max of -- min < i
+      GT -> case IntMap.deleteLE max dom of -- min <= max < i <= min'
+        gt | isVal (Dom gt) -> Just (Dom gt, Pruning.val)
+           | otherwise -> Just (Dom gt, Pruning.min)
+      EQ -> case IntMap.deleteLE min dom of -- min < i == max
+        gt | IntMap.null gt -> Just (singleton max, Pruning.val)
+           | otherwise -> Just (Dom $ IntMap.insert max max gt, Pruning.min)
+      LT -> case IntMap.deleteLE min dom of -- min < i < max
+        gt -> Just (Dom $ IntMap.insert i max gt, Pruning.min)
 
 deleteGT :: Int -> Dom -> Maybe (Dom, Pruning)
-deleteGT i (Bounds min max)
-  | i < min = Just (empty, Pruning.val)
-  | i < max = Just (Bounds min i, if i == min then Pruning.val else Pruning.max)
-  | otherwise = Nothing
-
-intersection :: Dom -> Dom -> Maybe (Dom, Pruning)
-intersection d (Bounds min max) = deleteLT min `then'` deleteGT max $ d
+deleteGT i (Dom dom)
+  | IntMap.null dom = Nothing
+  | otherwise = case IntMap.lookupLE i dom of
+    Nothing -> Just (empty, Pruning.val) -- i < minimum
+    Just (min, max) -> case (compare i min, compare i max) of -- min <= i
+      (EQ, EQ) -> case IntMap.split min dom of -- min == i == max
+        (lt, gt) -> case (IntMap.null lt, IntMap.null gt) of
+          (_, True) -> Nothing
+          (True, False) -> Just (singleton min, Pruning.val)
+          (False, False) -> Just (Dom $ IntMap.insert min min lt, Pruning.max)
+      (EQ, _ {- LT -}) -> case IntMap.deleteGE min dom of -- min == i < max
+        lt | IntMap.null lt -> Just (singleton min, Pruning.val)
+           | otherwise -> Just (Dom $ IntMap.insert min min lt, Pruning.max)
+      (_ {- GT -}, LT) -> case IntMap.deleteGE min dom of -- min < i < max
+        lt -> Just (Dom $ IntMap.insert min i lt, Pruning.max)
+      (_ {- GT -}, _) -> case IntMap.split max dom of -- min < max <= i
+        (lt, gt) | IntMap.null gt -> Nothing
+                 | otherwise -> Just (Dom lt, Pruning.max)
 
 findMin :: Dom -> Int
-findMin (Bounds min max)
-  | min <= max = min
-  | otherwise = error "findMin: empty domain has no minimal element"
+findMin = fst . IntMap.findMin . getDom
 
 findMax :: Dom -> Int
-findMax (Bounds min max)
-  | max >= min = max
-  | otherwise = error "findMax: empty domain has no maximal element"
+findMax = snd . IntMap.findMax . getDom
 
 singleton :: Int -> Dom
-singleton i = Bounds i i
+singleton i = Dom $ IntMap.singleton i i
 
-sizeLE :: Int -> Dom -> Bool
-sizeLE i = Prelude.null . drop i . toList
-
-then' :: (a -> Maybe (a, Pruning)) ->
-         (a -> Maybe (a, Pruning)) ->
-         a -> Maybe (a, Pruning)
-then' f g a =
-  case f a of
-    Nothing -> g a
-    m@(Just (a', p)) -> case g a' of
-      Nothing -> m
-      Just (a'', p') -> Just (a'', Pruning.join p p')
+isVal :: Dom -> Bool
+isVal (Dom dom) = case IntMap.toList dom of
+  [] -> True
+  [(min, max)] | min == max -> True
+  _ -> False

@@ -30,6 +30,7 @@ library
     Control.Monad.FD.Internal.Dom
     Control.Monad.FD.Internal.HashMap.Lazy
     Control.Monad.FD.Internal.Int
+    Control.Monad.FD.Internal.IntMap.Lazy
     Control.Monad.FD.Internal.Pruning
   build-depends:
     base >= 4 && < 5,
