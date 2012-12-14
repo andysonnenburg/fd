@@ -48,9 +48,11 @@ deleteLT i (Dom dom)
     Nothing -> Nothing -- i <= minimum
     Just (min, max) -> case compare i max of -- min < i
       GT -> case IntMap.deleteLE max dom of -- min <= max < i <= min'
-        gt | isVal (Dom gt) -> Just (Dom gt, Pruning.val)
-           | otherwise -> Just (Dom gt, Pruning.min)
-      EQ -> case IntMap.deleteLE min dom of -- min < i == max
+        gt -> case IntMap.toList dom of
+          [] -> Just (empty, Pruning.val)
+          [(min', max')] | min' == max' -> Just (Dom gt, Pruning.val)
+          _ -> Just (Dom gt, Pruning.min)
+      EQ -> case IntMap.deleteLE max dom of -- min < i == max
         gt | IntMap.null gt -> Just (singleton max, Pruning.val)
            | otherwise -> Just (Dom $ IntMap.insert max max gt, Pruning.min)
       LT -> case IntMap.deleteLE min dom of -- min < i < max

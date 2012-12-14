@@ -26,7 +26,6 @@ import GHC.Integer.GMP.Prim (cmpIntegerInt#,
 infixl 6 +!
 (+!) :: Int -> Int -> Int
 #ifdef __GLASGOW_HASKELL__
-{-# NOINLINE (+!) #-}
 I# i +! I# j =
   case addIntC# i j of
     (# r, c #)
@@ -44,7 +43,6 @@ a +! b =
 infixl 6 -!
 (-!) :: Int -> Int -> Int
 #ifdef __GLASGOW_HASKELL__
-{-# NOINLINE (-!) #-}
 I# a -! I# b =
   case subIntC# a b of
     (# r, c #)
