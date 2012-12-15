@@ -25,7 +25,11 @@ import qualified Control.Monad.FD.Internal.Pruning as Pruning
 import Prelude hiding (min, max, null)
 import qualified Prelude
 
-data Dom = Dom Min Max (Maybe IntSet) deriving Show
+data Dom =
+  Dom
+  {-# UNPACK #-} !Min
+  {-# UNPACK #-} !Max
+  !(Maybe IntSet) deriving Show
 
 type Min = Int
 type Max = Int

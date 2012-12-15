@@ -23,7 +23,7 @@ module Control.Monad.FD
 
 import Control.Applicative
 import Control.Arrow
-import Control.Monad (liftM, liftM2)
+import Control.Monad (guard, liftM, liftM2)
 
 import Data.HashMap.Strict (HashMap)
 import qualified Data.HashMap.Strict as HashMap
@@ -40,7 +40,7 @@ import Control.Monad.FD.Internal hiding (Range, Term, fromInt, label, max, min)
 import qualified Control.Monad.FD.Internal as Internal
 import Control.Monad.FD.Internal.Int
 
-data Term s = Term (HashMap (Var s) Int) Int
+data Term s = Term !(HashMap (Var s) Int) {-# UNPACK #-} !Int
 
 freshTerm :: Monad m => FDT s m (Term s)
 freshTerm = liftM fromVar freshVar
@@ -74,41 +74,47 @@ instance Multiplicative (Term s) Int (Term s) where
 infix 4 #=, #<, #<=, #>, #>=
 (#=), (#<), (#<=), (#>), (#>=) :: Monad m => Term s -> Term s -> FDT s m ()
 
-Term x1 c1 #= Term x2 c2 =
-  tell $
-  [ x `in'` min #.. max
-  | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
-        c = fromIntegral $ c2 -! c1
-  , (x, a) <- HashMap.toList x1
-  , let (min, max) = bounds (HashMap.delete x xs) c a
-  ] ++
-  [ x `in'` min #.. max
-  | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
-        c = fromIntegral $ c1 -! c2
-  , (x, a) <- HashMap.toList x2
-  , let (min, max) = bounds (HashMap.delete x xs) c a
-  ]
+Term x1 c1 #= Term x2 c2
+  | HashMap.null x1 && HashMap.null x2 =
+    guard $ c1 == c2
+  | otherwise =
+    tell $
+    [ x `in'` min #.. max
+    | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
+          c = fromIntegral $ c2 -! c1
+    , (x, a) <- HashMap.toList x1
+    , let (min, max) = bounds (HashMap.delete x xs) c a
+    ] ++
+    [ x `in'` min #.. max
+    | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
+          c = fromIntegral $ c1 -! c2
+    , (x, a) <- HashMap.toList x2
+    , let (min, max) = bounds (HashMap.delete x xs) c a
+    ]
 
 a #< b = a + 1 #<= b
 
-Term x1 c1 #<= Term x2 c2 =
-  tell $
-  [ x `in'` min #.. max
-  | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
-        c = fromIntegral $ c2 -! c1
-  , (x, a) <- HashMap.toList x1
-  , let r = bounds (HashMap.delete x xs) c a
-        (min, max) | a >= 0 = (minBound, snd r)
-                   | otherwise = (fst r, maxBound)
-  ] ++
-  [ x `in'` min #.. max
-  | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
-        c = fromIntegral $ c1 -! c2
-  , (x, a) <- HashMap.toList x2
-  , let r = bounds (HashMap.delete x xs) c a
-        (min, max) | a >= 0 = (fst r, maxBound)
-                   | otherwise = (minBound, snd r)
-  ]
+Term x1 c1 #<= Term x2 c2
+  | HashMap.null x1 && HashMap.null x2 =
+    guard $ c1 == c2
+  | otherwise =
+    tell $
+    [ x `in'` min #.. max
+    | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
+          c = fromIntegral $ c2 -! c1
+    , (x, a) <- HashMap.toList x1
+    , let r = bounds (HashMap.delete x xs) c a
+          (min, max) | a >= 0 = (minBound, snd r)
+                     | otherwise = (fst r, maxBound)
+    ] ++
+    [ x `in'` min #.. max
+    | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
+          c = fromIntegral $ c1 -! c2
+    , (x, a) <- HashMap.toList x2
+    , let r = bounds (HashMap.delete x xs) c a
+          (min, max) | a >= 0 = (fst r, maxBound)
+                     | otherwise = (minBound, snd r)
+    ]
 
 (#>) = flip (#<)
 
