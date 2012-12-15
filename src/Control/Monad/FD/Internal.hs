@@ -148,7 +148,7 @@ instance Integral Int Int where
   quot = Prelude.quot
   div = Prelude.div
 
-newtype Var (s :: Region) = Var { unwrapVar :: Integer } deriving Eq
+newtype Var (s :: Region) = Var { unwrapVar :: Int } deriving Eq
 
 instance Hashable (Var s) where
   hashWithSalt salt = hashWithSalt salt . unwrapVar
@@ -160,7 +160,7 @@ freshVar = do
   put s { varCount = varCount Prelude.+ 1
         , vars = HashMap.insert x initVarS vars
         }
-  return $! x
+  return x
 
 infixl 6 :+, :-
 infixl 7 :*, `Quot`, `Div`
@@ -405,7 +405,7 @@ whenPruned x listener = modifyVar x $ \ s@VarS {..} ->
   s { listeners = listeners |> listener }
 
 newtype Propagator (s :: Region) =
-  Propagator { unwrapPropagator :: Integer
+  Propagator { unwrapPropagator :: Int
              } deriving Eq
 
 instance Hashable (Propagator s) where
@@ -431,7 +431,7 @@ newPropagator m a = do
                                                      , antimonotoneVars = a
                                                      } propagators
         }
-  return $! x
+  return x
 
 readPropagator :: Monad m => Propagator s -> FDT s m (PropagatorS s)
 readPropagator x = liftM (!x) $ gets propagators
@@ -457,7 +457,7 @@ modifyPropagator :: Monad m =>
 modifyPropagator x f = modify $ \ s@S {..} ->
   s { propagators = HashMap.adjust f x propagators }
 
-newtype Flag (s :: Region) = Flag { unwrapFlag :: Integer } deriving Eq
+newtype Flag (s :: Region) = Flag { unwrapFlag :: Int } deriving Eq
 
 instance Hashable (Flag s) where
   hashWithSalt salt = hashWithSalt salt . unwrapFlag
@@ -469,7 +469,7 @@ newFlag = do
   put s { flagCount = flagCount Prelude.+ 1
         , unmarkedFlags = HashSet.insert flag unmarkedFlags
         }
-  return $! flag
+  return flag
 
 unlessMarked :: Monad m => Flag s -> FDT s m () -> FDT s m ()
 unlessMarked flag m = do
@@ -483,21 +483,21 @@ mark flag = modify $ \ s@S {..} ->
 data Region
 
 data S s m =
-  S { varCount :: !Integer
+  S { varCount :: {-# UNPACK #-} !Int
     , vars :: !(HashMap (Var s) (VarS s m))
-    , propagatorCount :: !Integer
+    , propagatorCount :: {-# UNPACK #-} !Int
     , propagators :: !(HashMap (Propagator s) (PropagatorS s))
-    , flagCount :: !Integer
+    , flagCount :: {-# UNPACK #-} !Int
     , unmarkedFlags :: !(HashSet (Flag s))
     }
 
 initS :: Monad m => S s m
 initS =
-  S { varCount = toInteger (minBound :: Int)
+  S { varCount = 0
     , vars = mempty
-    , propagatorCount = toInteger (minBound :: Int)
+    , propagatorCount = 0
     , propagators = mempty
-    , flagCount = toInteger (minBound :: Int)
+    , flagCount = 0
     , unmarkedFlags = mempty
     }
 
