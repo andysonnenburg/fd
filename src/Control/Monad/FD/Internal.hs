@@ -1,8 +1,12 @@
+{-# LANGUAGE CPP #-}
+#if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 {-# LANGUAGE
     DataKinds
   , EmptyDataDecls
-  , FunctionalDependencies
-  , KindSignatures
+  , KindSignatures #-}
+#endif
+{-# LANGUAGE
+    FunctionalDependencies
   , MultiParamTypeClasses
   , Rank2Types
   , RecordWildCards #-}
@@ -143,7 +147,11 @@ instance Integral Int Int where
   quot = Prelude.quot
   div = Prelude.div
 
+#if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 newtype Var (s :: Region) = Var { unwrapVar :: Int } deriving Eq
+#else
+newtype Var s = Var { unwrapVar :: Int } deriving Eq
+#endif
 
 instance Hashable (Var s) where
   hashWithSalt salt = hashWithSalt salt . unwrapVar
@@ -398,7 +406,11 @@ whenPruned :: Var s -> (Pruning -> FDT s m ()) -> FDT s m ()
 whenPruned x listener = modifyVar x $ \ s@VarS {..} ->
   s { listeners = listeners |> listener }
 
+#if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 newtype Propagator (s :: Region) =
+#else
+newtype Propagator s =
+#endif
   Propagator { unwrapPropagator :: Int
              } deriving Eq
 
@@ -447,7 +459,11 @@ modifyPropagator :: Propagator s ->
 modifyPropagator x f = modify $ \ s@S {..} ->
   s { propagators = HashMap.adjust f x propagators }
 
+#if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 newtype Flag (s :: Region) = Flag { unwrapFlag :: Int } deriving Eq
+#else
+newtype Flag s = Flag { unwrapFlag :: Int } deriving Eq
+#endif
 
 instance Hashable (Flag s) where
   hashWithSalt salt = hashWithSalt salt . unwrapFlag
@@ -470,7 +486,9 @@ mark :: Flag s -> FDT s m ()
 mark flag = modify $ \ s@S {..} ->
   s { unmarkedFlags = HashSet.delete flag unmarkedFlags }
 
+#if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 data Region
+#endif
 
 data S s m =
   S { varCount :: {-# UNPACK #-} !Int

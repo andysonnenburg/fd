@@ -38,15 +38,17 @@ library
     unordered-containers,
     semigroups
   other-extensions:
-    EmptyDataDecls,
+    CPP
     FunctionalDependencies,
-    KindSignatures,
     MultiParamTypeClasses
     Rank2Types,
     RebindableSyntax,
     RecordWildCards
   if impl(ghc)
     other-extensions: MagicHash, UnboxedTuples
+  if impl(ghc >= 7.6)
+    other-extensions: EmptyDataDecls, KindSignatures
+    cpp-options: -DLANGUAGE_DataKinds -DLANGUAGE_KindSignatures
   if flag(integer-gmp)
     build-depends: integer-gmp
     other-extensions: MagicHash, UnboxedTuples
