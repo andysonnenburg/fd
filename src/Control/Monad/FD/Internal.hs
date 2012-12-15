@@ -38,7 +38,6 @@ import Control.Monad (MonadPlus (mplus, mzero),
                       unless,
                       when)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Logic (LogicT, observeAllT)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (forM_, toList)
@@ -70,44 +69,40 @@ runFD :: (forall s . FD s a) -> [a]
 runFD = runIdentity . runFDT
 
 newtype FDT s m a =
-  FDT { unFDT :: S s m -> LogicT m (PairS s m a)
+  FDT { unFDT :: forall r .
+                 S s m ->
+                 (PairS s m a -> m r -> m r) ->
+                 m r ->
+                 m r
       }
 
 runFDT :: Monad m => (forall s . FDT s m a) -> m [a]
-runFDT m = observeAllT $ liftM fst' $ unFDT m initS
+runFDT m = unFDT m initS (liftM . (:) . fst') (return [])
 
-instance Functor m => Functor (FDT s m) where
-  fmap f m = FDT $ \ s -> fmap (\ (a :+: s') -> f a :+: s') $ unFDT m s
+instance Functor (FDT s m) where
+  fmap f m = FDT $ \ s sk fk -> unFDT m s (sk . fmap f) fk
 
-instance Applicative m => Applicative (FDT s m) where
-  pure a = FDT $ \ s -> pure $ a :+: s
-  f <*> a = FDT $ \ s -> do
-    f' :+: s' <- unFDT f s
-    a' :+: s'' <- unFDT a s'
-    pure $ f' a' :+: s''
+instance Applicative (FDT s m) where
+  pure a = FDT $ \ s sk fk -> sk (a :+: s) fk
+  f <*> a = FDT $ \ s sk fk ->
+    unFDT f s (\ (f' :+: s') fk' -> unFDT a s' (sk . fmap f') fk') fk
 
-instance Applicative m => Alternative (FDT s m) where
-  empty = FDT $ \ _ -> empty
-  m <|> n = FDT $ \ s -> unFDT m s <|> unFDT n s
+instance Alternative (FDT s m) where
+  empty = FDT $ \ _ _ fk -> fk
+  m <|> n = FDT $ \ s sk fk -> unFDT m s sk (unFDT n s sk fk)
 
-instance Monad m => Monad (FDT s m) where
-  return a = FDT $ \ s -> return $ a :+: s
-  m >>= k = FDT $ \ s -> do
-    a :+: s' <- unFDT m s
-    unFDT (k a) s'
-  m >> n = FDT $ \ s -> do
-    _ :+: s' <- unFDT m s
-    unFDT n s'
-  fail str = FDT $ \ _ -> fail str
+instance Monad (FDT s m) where
+  return a = FDT $ \ s sk fk -> sk (a :+: s) fk
+  m >>= k = FDT $ \ s sk fk ->
+    unFDT m s (\ (a :+: s') fk' -> unFDT (k a) s' sk fk') fk
+  fail _ = FDT $ \ _ _ fk -> fk
 
 instance Monad m => MonadPlus (FDT s m) where
-  mzero = FDT $ \ _ -> mzero
-  m `mplus` n = FDT $ \ s -> unFDT m s `mplus` unFDT n s
+  mzero = FDT $ \ _ _ fk -> fk
+  m `mplus` n = FDT $ \ s sk fk -> unFDT m s sk (unFDT n s sk fk)
 
 instance MonadTrans (FDT s) where
-  lift m = FDT $ \ s -> do
-    a <- lift m
-    return $ a :+: s
+  lift m = FDT $ \ s sk fk -> m >>= \ a -> sk (a :+: s) fk
 
 instance MonadIO m => MonadIO (FDT s m) where
   liftIO = lift . liftIO
@@ -215,7 +210,7 @@ dom :: Var s -> Range s
 dom = Dom
 
 infixr 1 `In`
-data Indexical s = Var s `In` Range s
+data Indexical s = !(Var s) `In` !(Range s)
 
 infixr 1 `in'`
 in' :: Var s -> Range s -> Indexical s
@@ -503,20 +498,23 @@ initS =
 
 data PairS s m a = a :+: !(S s m)
 
+instance Functor (PairS s m) where
+  fmap f (a :+: s) = f a :+: s
+
 fst' :: PairS s m a -> a
 fst' (a :+: _) = a
 
-get :: Monad m => FDT s m (S s m)
-get = FDT $ \ s -> return $ s :+: s
+get :: FDT s m (S s m)
+get = FDT $ \ s sk fk -> sk (s :+: s) fk
 
 put :: Monad m => S s m -> FDT s m ()
-put s = s `seq` FDT $ \ _ -> return $ () :+: s
+put s = s `seq` FDT $ \ _ sk fk -> sk (() :+: s) fk
 
 modify :: Monad m => (S s m -> S s m) -> FDT s m ()
-modify f = FDT $ \ s -> return $! () :+: f s
+modify f = FDT $ \ s sk fk -> flip sk fk $! () :+: f s
 
 gets :: Monad m => (S s m -> a) -> FDT s m a
-gets f = FDT $ \ s -> return $ f s :+: s
+gets f = FDT $ \ s sk fk -> sk (f s :+: s) fk
 
 whenNothing :: Monad m => Maybe a -> m () -> m ()
 whenNothing p m = maybe m (const $ return ()) p

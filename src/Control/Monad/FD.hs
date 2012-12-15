@@ -36,7 +36,7 @@ import Prelude hiding (Fractional (..),
                        fromIntegral, max, min)
 import qualified Prelude
 
-import Control.Monad.FD.Internal hiding (Range, Term, fromInt, label, max, min)
+import Control.Monad.FD.Internal hiding (Term, fromInt, label, max, min)
 import qualified Control.Monad.FD.Internal as Internal
 import Control.Monad.FD.Internal.Int
 
@@ -120,21 +120,21 @@ Term x1 c1 #<= Term x2 c2
 
 (#>=) = flip (#<=)
 
-type Range s = (Internal.Term s, Internal.Term s)
+type Bounds s = (Internal.Term s, Internal.Term s)
 type Factor = Int
 type Addend = Int
 type Divisor = Int
 
-bounds :: HashMap (Var s) Factor -> Addend -> Divisor -> Range s
-bounds x c a =
+bounds :: HashMap (Var s) Factor -> Addend -> Divisor -> Bounds s
+bounds xs c a =
   (`div'` a) *** (`div` a) <<<
   whenA (a < 0) swap $
-  HashMap.foldrWithKey f (pair $ fromIntegral c) x
+  HashMap.foldrWithKey f (pair $ fromIntegral c) xs
   where
-    f k v = case compare v 0 of
-      GT -> (+ v * Internal.min k) *** (+ v * Internal.max k)
+    f x v = case compare v 0 of
+      GT -> (+ v * Internal.min x) *** (+ v * Internal.max x)
       EQ -> id
-      LT -> (+ v * Internal.max k) *** (+ v * Internal.min k)
+      LT -> (+ v * Internal.max x) *** (+ v * Internal.min x)
 
 label :: Monad m => Term s -> FDT s m Int
 label (Term x y) =

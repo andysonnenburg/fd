@@ -135,4 +135,4 @@ retainAll (Dom min1 max1 (Just set1)) dom@(Dom min2 max2 Nothing) =
     set2 = IntSet.fromList [Prelude.max min1 min2 .. Prelude.min max1 max2]
 
 toList :: Dom -> [Int]
-toList (Dom min max set) = maybe [min .. max] IntSet.toList $ set
+toList (Dom min max set) = maybe [min .. max] IntSet.toList set
