@@ -33,7 +33,6 @@ module Control.Monad.FD.Internal
 import Control.Applicative
 import Control.Monad (MonadPlus (mplus, mzero),
                       liftM,
-                      liftM2,
                       msum,
                       unless,
                       when)
@@ -69,23 +68,22 @@ runFD :: (forall s . FD s a) -> [a]
 runFD = runIdentity . runFDT
 
 newtype FDT s m a =
-  FDT { unFDT :: forall r .
-                 S s m ->
-                 (PairS s m a -> m r -> m r) ->
-                 m r ->
-                 m r
+  FDT { unFDT :: forall r . S s m -> (PairS s m a -> m r -> m r) -> m r -> m r
       }
 
 runFDT :: Monad m => (forall s . FDT s m a) -> m [a]
 runFDT m = unFDT m initS (liftM . (:) . fst') (return [])
 
 instance Functor (FDT s m) where
-  fmap f m = FDT $ \ s sk fk -> unFDT m s (sk . fmap f) fk
+  fmap f m = FDT $ \ s sk fk ->
+    unFDT m s (\ (a :+: s') fk' -> sk (f a :+: s') fk') fk
 
 instance Applicative (FDT s m) where
   pure a = FDT $ \ s sk fk -> sk (a :+: s) fk
   f <*> a = FDT $ \ s sk fk ->
-    unFDT f s (\ (f' :+: s') fk' -> unFDT a s' (sk . fmap f') fk') fk
+    unFDT f s (\ (f' :+: s') fk' ->
+                unFDT a s' (\ (a' :+: s'') fk'' ->
+                             sk (f' a' :+: s'') fk'') fk') fk
 
 instance Alternative (FDT s m) where
   empty = FDT $ \ _ _ fk -> fk
@@ -95,9 +93,11 @@ instance Monad (FDT s m) where
   return a = FDT $ \ s sk fk -> sk (a :+: s) fk
   m >>= k = FDT $ \ s sk fk ->
     unFDT m s (\ (a :+: s') fk' -> unFDT (k a) s' sk fk') fk
+  m >> n = FDT $ \ s sk fk ->
+    unFDT m s (\ (_ :+: s') fk' -> unFDT n s' sk fk') fk
   fail _ = FDT $ \ _ _ fk -> fk
 
-instance Monad m => MonadPlus (FDT s m) where
+instance MonadPlus (FDT s m) where
   mzero = FDT $ \ _ _ fk -> fk
   m `mplus` n = FDT $ \ s sk fk -> unFDT m s sk (unFDT n s sk fk)
 
@@ -216,7 +216,7 @@ infixr 1 `in'`
 in' :: Var s -> Range s -> Indexical s
 in' = In
 
-tell :: Monad m => [Indexical s] -> FDT s m ()
+tell :: [Indexical s] -> FDT s m ()
 tell is = do
   entailed <- newFlag
   forM_ is $ \ (x `In` r) -> do
@@ -236,8 +236,7 @@ tell is = do
       (False, False) ->
         addPropagator x r m a entailed
 
-addPropagator :: Monad m =>
-                 Var s -> Range s ->
+addPropagator :: Var s -> Range s ->
                  MonotoneVars s -> AntimonotoneVars s ->
                  Flag s ->
                  FDT s m ()
@@ -270,7 +269,7 @@ addPropagator x r m a entailed = do
             (False, False) ->
               return ()
 
-label :: Monad m => Var s -> FDT s m Int
+label :: Var s -> FDT s m Int
 label x = do
   dom' <- readDomain x
   case Dom.toList dom' of
@@ -285,7 +284,7 @@ label x = do
 
 type ConditionalVars s = (HashSet (Var s), HashSet (Var s))
 
-getConditionalTermVars :: Monad m => Term s -> FDT s m (ConditionalVars s)
+getConditionalTermVars :: Term s -> FDT s m (ConditionalVars s)
 getConditionalTermVars t = case t of
   Int _ ->
     return mempty
@@ -299,13 +298,13 @@ getConditionalTermVars t = case t of
     return (s1 `mappend` g2, g1 `mappend` s2)
   x :* t'
     | x >= 0 -> getConditionalTermVars t'
-    | otherwise -> liftM swap $ getConditionalTermVars t'
+    | otherwise -> swap <$> getConditionalTermVars t'
   t' `Quot` x
     | x >= 0 -> getConditionalTermVars t'
-    | otherwise -> liftM swap $ getConditionalTermVars t'
+    | otherwise -> swap <$> getConditionalTermVars t'
   t' `Div` x
     | x >= 0 -> getConditionalTermVars t'
-    | otherwise -> liftM swap $ getConditionalTermVars t'
+    | otherwise -> swap <$> getConditionalTermVars t'
   Min x -> do
     determined <- isDetermined x
     return (if determined then mempty else HashSet.singleton x, mempty)
@@ -313,7 +312,7 @@ getConditionalTermVars t = case t of
     determined <- isDetermined x
     return (mempty, if determined then mempty else HashSet.singleton x)
 
-getConditionalRangeVars :: Monad m => Range s -> FDT s m (ConditionalVars s)
+getConditionalRangeVars :: Range s -> FDT s m (ConditionalVars s)
 getConditionalRangeVars r = case r of
   t1 :.. t2 -> do
     (s1, g1) <- getConditionalTermVars t1
@@ -323,8 +322,8 @@ getConditionalRangeVars r = case r of
     determined <- isDetermined x
     return (mempty, if determined then mempty else HashSet.singleton x)
 
-isDetermined :: Monad m => Var s -> FDT s m Bool
-isDetermined = liftM Dom.isVal . readDomain
+isDetermined :: Var s -> FDT s m Bool
+isDetermined = fmap Dom.isVal . readDomain
 
 termVars :: Term s -> HashMap (Var s) Pruning
 termVars t = case t of
@@ -342,7 +341,7 @@ rangeVars r = case r of
   t1 :.. t2 -> (HashMap.unionWith (<>) `on` termVars) t1 t2
   Dom x -> HashMap.singleton x Pruning.dom
 
-pruneDom :: Monad m => Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
+pruneDom :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 pruneDom (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
@@ -351,21 +350,21 @@ pruneDom (Dom x) dom' = do
   dom'' <- readDomain x
   return $! Dom.retainAll dom'' dom'
 
-pruned :: Monad m => Var s -> Pruning -> FDT s m ()
+pruned :: Var s -> Pruning -> FDT s m ()
 pruned x pruning = readListeners x >>= mapM_ ($ pruning) . toList
 
-getVal :: Monad m => Term s -> FDT s m Int
+getVal :: Term s -> FDT s m Int
 getVal t = case t of
   Int i -> return i
-  t1 :+ t2 -> liftM2 (+!) (getVal t1) (getVal t2)
-  t1 :- t2 -> liftM2 (-!) (getVal t1) (getVal t2)
-  x :* t' -> liftM (x *!) $ getVal t'
+  t1 :+ t2 -> liftA2 (+!) (getVal t1) (getVal t2)
+  t1 :- t2 -> liftA2 (-!) (getVal t1) (getVal t2)
+  x :* t' -> (x *!) <$> getVal t'
   _ `Quot` 0 -> mzero
-  t' `Quot` x -> liftM (`quot` x) $ getVal t'
+  t' `Quot` x -> (`quot` x) <$> getVal t'
   _ `Div` 0 -> mzero
-  t' `Div` x -> liftM (`div` x) $ getVal t'
-  Min x -> liftM Dom.findMin $ readDomain x
-  Max x -> liftM Dom.findMax $ readDomain x
+  t' `Div` x -> (`div` x) <$> getVal t'
+  Min x -> Dom.findMin <$> readDomain x
+  Max x -> Dom.findMax <$> readDomain x
 
 data VarS s m =
   VarS { domain :: {-# UNPACK #-} !Dom
@@ -379,23 +378,23 @@ initVarS = VarS { domain = Dom.full
                 , listeners = mempty
                 }
 
-readVar :: Monad m => Var s -> FDT s m (VarS s m)
-readVar x = liftM (!x) $ gets vars
+readVar :: Var s -> FDT s m (VarS s m)
+readVar x = (!x) <$> gets vars
 
-readDomain :: Monad m => Var s -> FDT s m Dom
-readDomain = liftM domain . readVar
+readDomain :: Var s -> FDT s m Dom
+readDomain = fmap domain . readVar
 
-modifyVar :: Monad m => Var s -> (VarS s m -> VarS s m) -> FDT s m ()
+modifyVar :: Var s -> (VarS s m -> VarS s m) -> FDT s m ()
 modifyVar x f = modify $ \ s@S {..} ->
   s { vars = HashMap.adjust f x vars }
 
-writeDomain :: Monad m => Var s -> Dom -> FDT s m ()
+writeDomain :: Var s -> Dom -> FDT s m ()
 writeDomain x d = modifyVar x $ \ s@VarS {..} -> s { domain = d }
 
-readListeners :: Monad m => Var s -> FDT s m (Seq (Listener s m))
-readListeners = liftM listeners . readVar
+readListeners :: Var s -> FDT s m (Seq (Listener s m))
+readListeners = fmap listeners . readVar
 
-whenPruned :: Monad m => Var s -> (Pruning -> FDT s m ()) -> FDT s m ()
+whenPruned :: Var s -> (Pruning -> FDT s m ()) -> FDT s m ()
 whenPruned x listener = modifyVar x $ \ s@VarS {..} ->
   s { listeners = listeners |> listener }
 
@@ -414,8 +413,7 @@ data PropagatorS s =
 type MonotoneVars s = HashSet (Var s)
 type AntimonotoneVars s = HashSet (Var s)
 
-newPropagator :: Monad m =>
-                 MonotoneVars s ->
+newPropagator :: MonotoneVars s ->
                  AntimonotoneVars s ->
                  FDT s m (Propagator s)
 newPropagator m a = do
@@ -428,25 +426,22 @@ newPropagator m a = do
         }
   return x
 
-readPropagator :: Monad m => Propagator s -> FDT s m (PropagatorS s)
-readPropagator x = liftM (!x) $ gets propagators
+readPropagator :: Propagator s -> FDT s m (PropagatorS s)
+readPropagator x = (!x) <$> gets propagators
 
-modifyMonotoneVars :: Monad m =>
-                      Propagator s ->
+modifyMonotoneVars :: Propagator s ->
                       (MonotoneVars s -> MonotoneVars s) ->
                       FDT s m ()
 modifyMonotoneVars x f = modifyPropagator x $ \ s@PropagatorS {..} ->
    s { monotoneVars = f monotoneVars }
 
-modifyAntimonotoneVars :: Monad m =>
-                          Propagator s ->
+modifyAntimonotoneVars :: Propagator s ->
                           (AntimonotoneVars s -> AntimonotoneVars s) ->
                           FDT s m ()
 modifyAntimonotoneVars x f = modifyPropagator x $ \ s@PropagatorS {..} ->
   s { antimonotoneVars = f antimonotoneVars }
 
-modifyPropagator :: Monad m =>
-                    Propagator s ->
+modifyPropagator :: Propagator s ->
                     (PropagatorS s -> PropagatorS s) ->
                     FDT s m ()
 modifyPropagator x f = modify $ \ s@S {..} ->
@@ -457,7 +452,7 @@ newtype Flag (s :: Region) = Flag { unwrapFlag :: Int } deriving Eq
 instance Hashable (Flag s) where
   hashWithSalt salt = hashWithSalt salt . unwrapFlag
 
-newFlag :: Monad m => FDT s m (Flag s)
+newFlag :: FDT s m (Flag s)
 newFlag = do
   s@S {..} <- get
   let flag = Flag flagCount
@@ -466,12 +461,12 @@ newFlag = do
         }
   return flag
 
-unlessMarked :: Monad m => Flag s -> FDT s m () -> FDT s m ()
+unlessMarked :: Flag s -> FDT s m () -> FDT s m ()
 unlessMarked flag m = do
-  unmarked <- liftM (HashSet.member flag) (gets unmarkedFlags)
+  unmarked <- HashSet.member flag <$> gets unmarkedFlags
   when unmarked m
 
-mark :: Monad m => Flag s -> FDT s m ()
+mark :: Flag s -> FDT s m ()
 mark flag = modify $ \ s@S {..} ->
   s { unmarkedFlags = HashSet.delete flag unmarkedFlags }
 
@@ -486,7 +481,7 @@ data S s m =
     , unmarkedFlags :: !(HashSet (Flag s))
     }
 
-initS :: Monad m => S s m
+initS :: S s m
 initS =
   S { varCount = 0
     , vars = mempty
@@ -498,22 +493,19 @@ initS =
 
 data PairS s m a = a :+: !(S s m)
 
-instance Functor (PairS s m) where
-  fmap f (a :+: s) = f a :+: s
-
 fst' :: PairS s m a -> a
 fst' (a :+: _) = a
 
 get :: FDT s m (S s m)
 get = FDT $ \ s sk fk -> sk (s :+: s) fk
 
-put :: Monad m => S s m -> FDT s m ()
+put :: S s m -> FDT s m ()
 put s = s `seq` FDT $ \ _ sk fk -> sk (() :+: s) fk
 
-modify :: Monad m => (S s m -> S s m) -> FDT s m ()
+modify :: (S s m -> S s m) -> FDT s m ()
 modify f = FDT $ \ s sk fk -> flip sk fk $! () :+: f s
 
-gets :: Monad m => (S s m -> a) -> FDT s m a
+gets :: (S s m -> a) -> FDT s m a
 gets f = FDT $ \ s sk fk -> sk (f s :+: s) fk
 
 whenNothing :: Monad m => Maybe a -> m () -> m ()
