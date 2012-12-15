@@ -157,7 +157,7 @@ freshVar :: Monad m => FDT s m (Var s)
 freshVar = do
   s@S {..} <- get
   let x = Var varCount
-  put s { varCount = varCount Prelude.+ 1
+  put s { varCount = varCount + 1
         , vars = HashMap.insert x initVarS vars
         }
   return x
@@ -426,7 +426,7 @@ newPropagator :: Monad m =>
 newPropagator m a = do
   s@S {..} <- get
   let x = Propagator propagatorCount
-  put s { propagatorCount = propagatorCount Prelude.+ 1
+  put s { propagatorCount = propagatorCount + 1
         , propagators = HashMap.insert x PropagatorS { monotoneVars = m
                                                      , antimonotoneVars = a
                                                      } propagators
@@ -466,7 +466,7 @@ newFlag :: Monad m => FDT s m (Flag s)
 newFlag = do
   s@S {..} <- get
   let flag = Flag flagCount
-  put s { flagCount = flagCount Prelude.+ 1
+  put s { flagCount = flagCount + 1
         , unmarkedFlags = HashSet.insert flag unmarkedFlags
         }
   return flag
