@@ -165,14 +165,14 @@ freshVar = do
 infixl 6 :+, :-
 infixl 7 :*, `Quot`, `Div`
 data Term s
-  = Term s :+ Term s
-  | Term s :- Term s
-  | Int :* Term s
-  | Term s `Quot` Int
-  | Term s `Div` Int
-  | Int Int
-  | Min (Var s)
-  | Max (Var s)
+  = !(Term s) :+ !(Term s)
+  | !(Term s) :- !(Term s)
+  | {-# UNPACK #-} !Int :* !(Term s)
+  | !(Term s) `Quot` {-# UNPACK #-} !Int
+  | !(Term s) `Div` {-# UNPACK #-} !Int
+  | Int {-# UNPACK #-} !Int
+  | Min !(Var s)
+  | Max !(Var s)
 
 instance Bounded (Term s) where
   minBound = Int minBound
@@ -205,8 +205,8 @@ max = Max
 
 infix 5 :..
 data Range s
-  = Term s :.. Term s
-  | Dom (Var s)
+  = !(Term s) :.. !(Term s)
+  | Dom !(Var s)
 
 (#..) :: Term s -> Term s -> Range s
 (#..) = (:..)
