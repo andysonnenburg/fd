@@ -44,7 +44,7 @@ import Control.Monad.Trans.Class (MonadTrans (lift))
 import Data.Foldable (forM_, toList)
 import Data.Function (on)
 import Data.Functor.Identity
-import Data.Hashable
+import Data.Hashable (Hashable (hashWithSalt))
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import Data.Monoid (mappend, mempty)
@@ -151,7 +151,6 @@ instance Integral Int Int where
 newtype Var (s :: Region) = Var { unwrapVar :: Integer } deriving Eq
 
 instance Hashable (Var s) where
-  hash = hash . unwrapVar
   hashWithSalt salt = hashWithSalt salt . unwrapVar
 
 freshVar :: Monad m => FDT s m (Var s)
@@ -410,7 +409,6 @@ newtype Propagator (s :: Region) =
              } deriving Eq
 
 instance Hashable (Propagator s) where
-  hash = hash . unwrapPropagator
   hashWithSalt salt = hashWithSalt salt . unwrapPropagator
 
 data PropagatorS s =
@@ -462,7 +460,6 @@ modifyPropagator x f = modify $ \ s@S {..} ->
 newtype Flag (s :: Region) = Flag { unwrapFlag :: Integer } deriving Eq
 
 instance Hashable (Flag s) where
-  hash = hash . unwrapFlag
   hashWithSalt salt = hashWithSalt salt . unwrapFlag
 
 newFlag :: Monad m => FDT s m (Flag s)
