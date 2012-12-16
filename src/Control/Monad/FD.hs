@@ -14,6 +14,7 @@ module Control.Monad.FD
        , Multiplicative (..)
        , Fractional (..)
        , (#=)
+       , (#/=)
        , (#<)
        , (#<=)
        , (#>)
@@ -71,8 +72,8 @@ instance Multiplicative Int (Term s) (Term s) where
 instance Multiplicative (Term s) Int (Term s) where
   Term x c * a = Term ((*! a) <$> x) (c *! a)
 
-infix 4 #=, #<, #<=, #>, #>=
-(#=), (#<), (#<=), (#>), (#>=) :: Monad m => Term s -> Term s -> FDT s m ()
+infix 4 #=, #/=, #<, #<=, #>, #>=
+(#=), (#/=), (#<), (#<=), (#>), (#>=) :: Monad m => Term s -> Term s -> FDT s m ()
 
 Term x1 c1 #= Term x2 c2
   | HashMap.null x1 && HashMap.null x2 =
@@ -92,7 +93,45 @@ Term x1 c1 #= Term x2 c2
     , let (min, max) = bounds (HashMap.delete x xs) c a
     ]
 
-a #< b = a + 1 #<= b
+Term x1 c1 #/= Term x2 c2
+  | HashMap.null x1 && HashMap.null x2 =
+    guard $ c1 == c2
+  | otherwise =
+    tell $
+    [ x `in'` complement (min #.. max)
+    | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
+          c = fromIntegral $ c2 -! c1
+    , (x, a) <- HashMap.toList x1
+    , let (min, max) = bounds (HashMap.delete x xs) c a
+    ] ++
+    [ x `in'` complement (min #.. max)
+    | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
+          c = fromIntegral $ c1 -! c2
+    , (x, a) <- HashMap.toList x2
+    , let (min, max) = bounds (HashMap.delete x xs) c a
+    ]
+
+Term x1 c1 #< Term x2 c2
+  | HashMap.null x1 && HashMap.null x2 =
+    guard $ c1 == c2
+  | otherwise =
+    tell $
+    [ x `in'` complement (min #.. max)
+    | let xs = HashMap.unionWith (+) x2 (negate <$> x1)
+          c = fromIntegral $ c2 -! c1
+    , (x, a) <- HashMap.toList x1
+    , let r = bounds (HashMap.delete x xs) c a
+          (min, max) | a >= 0 = (fst r, maxBound)
+                     | otherwise = (minBound, snd r)
+    ] ++
+    [ x `in'` complement (min #.. max)
+    | let xs = HashMap.unionWith (+) x1 (negate <$> x2)
+          c = fromIntegral $ c1 -! c2
+    , (x, a) <- HashMap.toList x2
+    , let r = bounds (HashMap.delete x xs) c a
+          (min, max) | a >= 0 = (minBound, snd r)
+                     | otherwise = (fst r, maxBound)
+    ]
 
 Term x1 c1 #<= Term x2 c2
   | HashMap.null x1 && HashMap.null x2 =
