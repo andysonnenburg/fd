@@ -368,10 +368,10 @@ retainRange :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 retainRange (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
-  return $! Dom.retainAll (Dom.fromBounds i1 i2) dom'
+  return $! Dom.retain (Dom.fromBounds i1 i2) dom'
 retainRange (Dom x) dom' = do
   dom'' <- readDomain x
-  return $! Dom.retainAll dom'' dom'
+  return $! Dom.retain dom'' dom'
 retainRange (Complement r) dom' =
   deleteRange r dom'
 
@@ -379,10 +379,10 @@ deleteRange :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 deleteRange (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
-  return $! Dom.deleteAll (Dom.fromBounds i1 i2) dom'
+  return $! Dom.delete (Dom.fromBounds i1 i2) dom'
 deleteRange (Dom x) dom' = do
   dom'' <- readDomain x
-  return $! Dom.deleteAll dom'' dom'
+  return $! Dom.delete dom'' dom'
 deleteRange (Complement r) dom' =
   retainRange r dom'
 
@@ -403,7 +403,7 @@ getVal t = case t of
   Max x -> Dom.findMax <$> readDomain x
 
 data VarS s m =
-  VarS { domain :: {-# UNPACK #-} !Dom
+  VarS { domain :: !Dom
        , listeners :: !(Seq (Listener s m))
        }
 
