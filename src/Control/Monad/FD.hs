@@ -12,6 +12,7 @@ module Control.Monad.FD
        , fromInt
        , Additive (..)
        , Multiplicative (..)
+       , Integral (..)
        , Fractional (..)
        , (#=)
        , (#/=)

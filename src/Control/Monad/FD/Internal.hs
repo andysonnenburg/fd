@@ -10,6 +10,9 @@
   , MultiParamTypeClasses
   , Rank2Types
   , RecordWildCards #-}
+#ifdef LANGUAGE_Trustworthy
+{-# LANGUAGE Trustworthy #-}
+#endif
 module Control.Monad.FD.Internal
        ( FD
        , runFD
@@ -33,7 +36,6 @@ module Control.Monad.FD.Internal
        , in'
        , tell
        , label
-       , assign
        ) where
 
 import Control.Applicative

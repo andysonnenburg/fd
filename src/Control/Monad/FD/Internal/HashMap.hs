@@ -1,3 +1,7 @@
+{-# LANGUAGE CPP #-}
+#ifdef LANGUAGE_Trustworthy
+{-# LANGUAGE Trustworthy #-}
+#endif
 module Control.Monad.FD.Internal.HashMap
        ( module Data.HashMap.Strict
        , forWithKeyM_

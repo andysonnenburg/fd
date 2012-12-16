@@ -46,6 +46,9 @@ library
     RecordWildCards
   if impl(ghc)
     other-extensions: MagicHash, UnboxedTuples
+  if impl(ghc >= 7.2)
+    other-extensions: Trustworthy
+    cpp-options: -DLANGUAGE_Trustworthy
   if impl(ghc >= 7.6)
     other-extensions: EmptyDataDecls, KindSignatures
     cpp-options: -DLANGUAGE_DataKinds -DLANGUAGE_KindSignatures

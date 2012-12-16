@@ -2,6 +2,9 @@
 #ifdef __GLASGOW_HASKELL__
 {-# LANGUAGE MagicHash, UnboxedTuples #-}
 #endif
+#ifdef LANGUAGE_Trustworthy
+{-# LANGUAGE Trustworthy #-}
+#endif
 module Control.Monad.FD.Internal.Int ((+!), (-!), (*!)) where
 
 #ifdef __GLASGOW_HASKELL__
