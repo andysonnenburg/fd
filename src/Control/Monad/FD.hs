@@ -42,7 +42,11 @@ import Control.Monad.FD.Internal hiding (Term, fromInt, label, max, min)
 import qualified Control.Monad.FD.Internal as Internal
 import Control.Monad.FD.Internal.Int
 
-data Term s = Term !(HashMap (Var s) Int) {-# UNPACK #-} !Int
+data Term s = Term !(HashMap (Var s) Factor) {-# UNPACK #-} !Addend
+
+type Factor = Int
+type Addend = Int
+type Divisor = Int
 
 freshTerm :: Monad m => FDT s m (Term s)
 freshTerm = liftM fromVar freshVar
@@ -96,7 +100,7 @@ Term x1 c1 #= Term x2 c2
 
 Term x1 c1 #/= Term x2 c2
   | HashMap.null x1 && HashMap.null x2 =
-    guard $ c1 == c2
+    guard $ c1 /= c2
   | otherwise =
     tell $
     [ x `in'` complement (min #.. max)
@@ -114,7 +118,7 @@ Term x1 c1 #/= Term x2 c2
 
 Term x1 c1 #< Term x2 c2
   | HashMap.null x1 && HashMap.null x2 =
-    guard $ c1 == c2
+    guard $ c1 < c2
   | otherwise =
     tell $
     [ x `in'` complement (min #.. max)
@@ -136,7 +140,7 @@ Term x1 c1 #< Term x2 c2
 
 Term x1 c1 #<= Term x2 c2
   | HashMap.null x1 && HashMap.null x2 =
-    guard $ c1 == c2
+    guard $ c1 <= c2
   | otherwise =
     tell $
     [ x `in'` min #.. max
@@ -161,9 +165,6 @@ Term x1 c1 #<= Term x2 c2
 (#>=) = flip (#<=)
 
 type Bounds s = (Internal.Term s, Internal.Term s)
-type Factor = Int
-type Addend = Int
-type Divisor = Int
 
 bounds :: HashMap (Var s) Factor -> Addend -> Divisor -> Bounds s
 bounds xs c a =
