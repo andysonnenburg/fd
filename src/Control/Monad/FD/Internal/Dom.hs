@@ -10,14 +10,15 @@ module Control.Monad.FD.Internal.Dom
        , isVal
        , deleteLT
        , deleteGT
+       , deleteAll
        , retainAll
        , toList
        ) where
 
 import Data.Foldable (foldMap)
-import Data.IntSet (IntSet)
+import Data.IntSet (IntSet, (\\))
 import qualified Data.IntSet as IntSet
-import Data.Semigroup (Option (Option), getOption)
+import Data.Semigroup (Option (Option), (<>), getOption)
 
 import Control.Monad.FD.Internal.Pruning (Pruning)
 import qualified Control.Monad.FD.Internal.Pruning as Pruning
@@ -92,7 +93,7 @@ prunedToVal dom1 dom2 = case (toList dom1, toList dom2) of
 size :: Dom -> Int
 size (Dom min max set)
   | min > max = 0
-  | otherwise = maybe (max - min) IntSet.size set
+  | otherwise = maybe (max - min + 1) IntSet.size set
 
 deleteLT :: Int -> Dom -> Maybe (Dom, Pruning)
 deleteLT x dom = prunedFromTo dom $ deleteLT' x dom
@@ -123,6 +124,29 @@ deleteGT'' :: Int -> IntSet -> IntSet
 deleteGT'' x set = case IntSet.splitMember x set of
   (lt, mem, _) | mem -> IntSet.insert x lt
                | otherwise -> lt
+
+deleteBetween' :: Int -> Int -> Dom -> Dom
+deleteBetween' min1 max1 (Dom min2 max2 Nothing) =
+  case (compare min1 min2, compare max1 max2) of
+    (GT, LT) -> Dom min2 max2 $ Just $
+                IntSet.fromList [min2 .. min1 - 1] <>
+                IntSet.fromList [max1 + 1 .. max2]
+    (_, LT) -> Dom (max1 + 1) max2 Nothing
+    (GT, _) -> Dom min2 (min1 - 1) Nothing
+    _ -> empty
+deleteBetween' min max (Dom _ _ (Just set)) =
+  case IntSet.split min set of
+    (lt, gt) -> case IntSet.split max gt of
+      (_, gt') -> fromIntSet $ lt <> gt'
+
+deleteAll :: Dom -> Dom -> Maybe (Dom, Pruning)
+deleteAll (Dom min max Nothing) dom
+  | min > max = Nothing
+  | otherwise = prunedFromTo dom (deleteBetween' min max dom)
+deleteAll (Dom _ _ (Just set1)) dom@(Dom _ _ (Just set2)) =
+  prunedFromTo dom (fromIntSet $ set2 \\ set1)
+deleteAll (Dom _ _ (Just set)) dom@(Dom min max Nothing) =
+  prunedFromTo dom (fromIntSet $ IntSet.fromList [min .. max] \\ set)
 
 retainAll :: Dom -> Dom -> Maybe (Dom, Pruning)
 retainAll (Dom min max Nothing) dom =

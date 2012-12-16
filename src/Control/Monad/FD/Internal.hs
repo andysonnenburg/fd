@@ -28,10 +28,12 @@ module Control.Monad.FD.Internal
        , Range
        , (#..)
        , dom
+       , complement
        , Indexical
        , in'
        , tell
        , label
+       , assign
        ) where
 
 import Control.Applicative
@@ -43,18 +45,22 @@ import Control.Monad (MonadPlus (mplus, mzero),
 import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
-import Data.Foldable (forM_, toList)
+import Data.Foldable (forM_, mapM_)
 import Data.Function (on)
 import Data.Functor.Identity
 import Data.Hashable (Hashable (hashWithSalt))
 import Data.HashSet (HashSet)
 import qualified Data.HashSet as HashSet
 import Data.Monoid (mappend, mempty)
-import Data.Semigroup ((<>))
 import Data.Sequence (Seq, (|>))
 import Data.Tuple (swap)
 
-import Prelude hiding (Fractional (..), Integral (..), Num (..), min, max)
+import Prelude hiding (Fractional (..),
+                       Integral (..),
+                       Num (..),
+                       max,
+                       mapM_,
+                       min)
 import Prelude (toInteger)
 import qualified Prelude
 
@@ -210,12 +216,16 @@ infix 5 :..
 data Range s
   = !(Term s) :.. !(Term s)
   | Dom !(Var s)
+  | Complement (Range s)
 
 (#..) :: Term s -> Term s -> Range s
 (#..) = (:..)
 
 dom :: Var s -> Range s
 dom = Dom
+
+complement :: Range s -> Range s
+complement = Complement
 
 infixr 1 `In`
 data Indexical s = !(Var s) `In` !(Range s)
@@ -231,7 +241,7 @@ tell is = do
     (m, a) <- getConditionalRangeVars r
     case (HashSet.null m, HashSet.null a) of
       (True, antimonotone) ->
-        readDomain x >>= pruneDom r >>= maybe
+        readDomain x >>= retainRange r >>= maybe
         (unless antimonotone $ addPropagator x r m a entailed)
         (\ (dom', pruning) -> do
             when (Dom.null dom') mzero
@@ -239,7 +249,7 @@ tell is = do
             writeDomain x dom'
             pruned x pruning)
       (False, True) ->
-        readDomain x >>= pruneDom r >>=
+        readDomain x >>= retainRange r >>=
         flip unlessNothing (addPropagator x r m a entailed)
       (False, False) ->
         addPropagator x r m a entailed
@@ -265,14 +275,14 @@ addPropagator x r m a entailed = do
           PropagatorS {..} <- readPropagator propagator
           case (HashSet.null monotoneVars, HashSet.null antimonotoneVars) of
             (True, antimonotone) ->
-              readDomain x >>= pruneDom r >>= maybe
+              readDomain x >>= retainRange r >>= maybe
               (when antimonotone $ mark entailed)
               (\ (dom', pruning') -> do
                   when (Dom.null dom') mzero
                   writeDomain x dom'
                   pruned x pruning')
             (False, True) ->
-              readDomain x >>= pruneDom r >>=
+              readDomain x >>= retainRange r >>=
               flip whenNothing (mark entailed)
             (False, False) ->
               return ()
@@ -285,10 +295,12 @@ label x = do
     [i] -> return i
     (i:j:is) -> assignTo i `mplus` assignTo j `mplus` msum (map assignTo is)
   where
-    assignTo i = do
-      writeDomain x $ Dom.singleton i
-      pruned x Pruning.val
-      return i
+    assignTo i = assign x i >> return i
+
+assign :: Var s -> Int -> FDT s m ()
+assign x i = do
+  writeDomain x $ Dom.singleton i
+  pruned x Pruning.val
 
 type ConditionalVars s = (HashSet (Var s), HashSet (Var s))
 
@@ -314,11 +326,11 @@ getConditionalTermVars t = case t of
     | x >= 0 -> getConditionalTermVars t'
     | otherwise -> swap <$> getConditionalTermVars t'
   Min x -> do
-    determined <- isDetermined x
-    return (if determined then mempty else HashSet.singleton x, mempty)
+    assigned <- isAssigned x
+    return (if assigned then mempty else HashSet.singleton x, mempty)
   Max x -> do
-    determined <- isDetermined x
-    return (mempty, if determined then mempty else HashSet.singleton x)
+    assigned <- isAssigned x
+    return (mempty, if assigned then mempty else HashSet.singleton x)
 
 getConditionalRangeVars :: Range s -> FDT s m (ConditionalVars s)
 getConditionalRangeVars r = case r of
@@ -327,17 +339,19 @@ getConditionalRangeVars r = case r of
     (s2, g2) <- getConditionalTermVars t2
     return (g1 `mappend` s2, s1 `mappend` g2)
   Dom x -> do
-    determined <- isDetermined x
-    return (mempty, if determined then mempty else HashSet.singleton x)
+    assigned <- isAssigned x
+    return (mempty, if assigned then mempty else HashSet.singleton x)
+  Complement r' ->
+    swap <$> getConditionalRangeVars r'
 
-isDetermined :: Var s -> FDT s m Bool
-isDetermined = fmap Dom.isVal . readDomain
+isAssigned :: Var s -> FDT s m Bool
+isAssigned = fmap Dom.isVal . readDomain
 
 termVars :: Term s -> HashMap (Var s) Pruning
 termVars t = case t of
   Int _ -> HashMap.empty
-  t1 :+ t2 -> (HashMap.unionWith (<>) `on` termVars) t1 t2
-  t1 :- t2 -> (HashMap.unionWith (<>) `on` termVars) t1 t2
+  t1 :+ t2 -> (HashMap.sunion `on` termVars) t1 t2
+  t1 :- t2 -> (HashMap.sunion `on` termVars) t1 t2
   _ :* t' -> termVars t'
   t' `Quot` _ -> termVars t'
   t' `Div` _ -> termVars t'
@@ -346,20 +360,34 @@ termVars t = case t of
 
 rangeVars :: Range s -> HashMap (Var s) Pruning
 rangeVars r = case r of
-  t1 :.. t2 -> (HashMap.unionWith (<>) `on` termVars) t1 t2
+  t1 :.. t2 -> (HashMap.sunion `on` termVars) t1 t2
   Dom x -> HashMap.singleton x Pruning.dom
+  Complement r' -> rangeVars r'
 
-pruneDom :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
-pruneDom (t1 :.. t2) dom' = do
+retainRange :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
+retainRange (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
   return $! Dom.retainAll (Dom.fromBounds i1 i2) dom'
-pruneDom (Dom x) dom' = do
+retainRange (Dom x) dom' = do
   dom'' <- readDomain x
   return $! Dom.retainAll dom'' dom'
+retainRange (Complement r) dom' =
+  deleteRange r dom'
+
+deleteRange :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
+deleteRange (t1 :.. t2) dom' = do
+  i1 <- getVal t1
+  i2 <- getVal t2
+  return $! Dom.deleteAll (Dom.fromBounds i1 i2) dom'
+deleteRange (Dom x) dom' = do
+  dom'' <- readDomain x
+  return $! Dom.deleteAll dom'' dom'
+deleteRange (Complement r) dom' =
+  retainRange r dom'
 
 pruned :: Var s -> Pruning -> FDT s m ()
-pruned x pruning = readListeners x >>= mapM_ ($ pruning) . toList
+pruned x pruning = readListeners x >>= mapM_ ($ pruning)
 
 getVal :: Term s -> FDT s m Int
 getVal t = case t of
@@ -408,11 +436,13 @@ whenPruned x listener = modifyVar x $ \ s@VarS {..} ->
 
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 newtype Propagator (s :: Region) =
-#else
-newtype Propagator s =
-#endif
   Propagator { unwrapPropagator :: Int
              } deriving Eq
+#else
+newtype Propagator s =
+  Propagator { unwrapPropagator :: Int
+             } deriving Eq
+#endif
 
 instance Hashable (Propagator s) where
   hashWithSalt salt = hashWithSalt salt . unwrapPropagator
