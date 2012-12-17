@@ -20,6 +20,7 @@ module Control.Monad.FD
        , (#<=)
        , (#>)
        , (#>=)
+       , distinct
        , label
        ) where
 
@@ -78,7 +79,7 @@ instance Multiplicative (Term s) Int (Term s) where
   Term x c * a = Term ((*! a) <$> x) (c *! a)
 
 infix 4 #=, #/=, #<, #<=, #>, #>=
-(#=), (#/=), (#<), (#<=), (#>), (#>=) :: Monad m => Term s -> Term s -> FDT s m ()
+(#=), (#/=), (#<), (#<=), (#>), (#>=) :: Term s -> Term s -> FDT s m ()
 
 Term x1 c1 #= Term x2 c2
   | HashMap.null x1 && HashMap.null x2 =
@@ -163,6 +164,13 @@ Term x1 c1 #<= Term x2 c2
 (#>) = flip (#<)
 
 (#>=) = flip (#<=)
+
+distinct :: [Term s] -> FDT s m ()
+distinct [] =
+  return ()
+distinct (x:xs) = do
+  mapM_ (x #/=) xs
+  distinct xs
 
 type Bounds s = (Internal.Term s, Internal.Term s)
 
