@@ -164,7 +164,7 @@ newtype Var s = Var { unwrapVar :: Int } deriving Eq
 instance Hashable (Var s) where
   hashWithSalt salt = hashWithSalt salt . unwrapVar
 
-freshVar :: Monad m => FDT s m (Var s)
+freshVar :: FDT s m (Var s)
 freshVar = do
   s@S {..} <- get
   let x = Var varCount

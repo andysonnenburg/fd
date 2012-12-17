@@ -49,7 +49,7 @@ type Factor = Int
 type Addend = Int
 type Divisor = Int
 
-freshTerm :: Monad m => FDT s m (Term s)
+freshTerm :: FDT s m (Term s)
 freshTerm = liftM fromVar freshVar
 
 fromVar :: Var s -> Term s
@@ -185,7 +185,7 @@ bounds xs c a =
       EQ -> id
       LT -> (+ v * Internal.max x) *** (+ v * Internal.min x)
 
-label :: Monad m => Term s -> FDT s m Int
+label :: Term s -> FDT s m Int
 label (Term x y) =
   HashMap.foldlWithKey' f (return $ fromIntegral y) x
   where
