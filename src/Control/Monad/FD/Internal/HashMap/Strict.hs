@@ -2,7 +2,7 @@
 #ifdef LANGUAGE_Trustworthy
 {-# LANGUAGE Trustworthy #-}
 #endif
-module Control.Monad.FD.Internal.HashMap
+module Control.Monad.FD.Internal.HashMap.Strict
        ( module Data.HashMap.Strict
        , forWithKeyM_
        , sunion

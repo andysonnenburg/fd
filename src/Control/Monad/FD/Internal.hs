@@ -68,8 +68,8 @@ import qualified Prelude
 
 import Control.Monad.FD.Internal.Dom (Dom)
 import qualified Control.Monad.FD.Internal.Dom as Dom
-import Control.Monad.FD.Internal.HashMap (HashMap, (!))
-import qualified Control.Monad.FD.Internal.HashMap as HashMap
+import Control.Monad.FD.Internal.HashMap.Strict (HashMap, (!))
+import qualified Control.Monad.FD.Internal.HashMap.Strict as HashMap
 import Control.Monad.FD.Internal.Int
 import Control.Monad.FD.Internal.Pruning (Pruning, affectedBy)
 import qualified Control.Monad.FD.Internal.Pruning as Pruning
@@ -394,8 +394,8 @@ pruned x pruning = readListeners x >>= mapM_ ($ pruning)
 getVal :: Term s -> FDT s m Int
 getVal t = case t of
   Int i -> return i
-  t1 :+ t2 -> liftA2 (+!) (getVal t1) (getVal t2)
-  t1 :- t2 -> liftA2 (-!) (getVal t1) (getVal t2)
+  t1 :+ t2 -> (+!) <$> getVal t1 <*> getVal t2
+  t1 :- t2 -> (-!) <$> getVal t1 <*> getVal t2
   x :* t' -> (x *!) <$> getVal t'
   _ `Quot` 0 -> mzero
   t' `Quot` x -> (`quot` x) <$> getVal t'

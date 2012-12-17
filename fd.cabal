@@ -27,7 +27,7 @@ library
     Control.Monad.FD.Internal
   other-modules:
     Control.Monad.FD.Internal.Dom
-    Control.Monad.FD.Internal.HashMap
+    Control.Monad.FD.Internal.HashMap.Strict
     Control.Monad.FD.Internal.Int
     Control.Monad.FD.Internal.Pruning
   build-depends:
