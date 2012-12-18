@@ -5,7 +5,12 @@
 #ifdef LANGUAGE_Trustworthy
 {-# LANGUAGE Trustworthy #-}
 #endif
-module Control.Monad.FD.Internal.Int ((+!), (-!), (*!)) where
+module Control.Monad.FD.Internal.Int
+       ( (+!)
+       , (-!)
+       , (*!)
+       , IsInt (toInt)
+       ) where
 
 #ifdef __GLASGOW_HASKELL__
 import GHC.Exts (Int (I#),
@@ -96,3 +101,6 @@ a *! b =
       | r > toInteger (maxBound :: Int) -> maxBound
       | otherwise -> fromInteger r
 #endif
+
+class IsInt a where
+  toInt :: a -> Int

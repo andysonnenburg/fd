@@ -50,9 +50,6 @@ import Control.Monad.Trans.Class (MonadTrans (lift))
 import Data.Foldable (forM_, mapM_)
 import Data.Function (on)
 import Data.Functor.Identity
-import Data.Hashable (Hashable (hashWithSalt))
-import Data.HashSet (HashSet)
-import qualified Data.HashSet as HashSet
 import Data.Monoid (mappend, mempty)
 import Data.Sequence (Seq, (|>))
 import Data.Tuple (swap)
@@ -68,9 +65,11 @@ import qualified Prelude
 
 import Control.Monad.FD.Internal.Dom (Dom)
 import qualified Control.Monad.FD.Internal.Dom as Dom
-import Control.Monad.FD.Internal.HashMap.Strict (HashMap, (!))
-import qualified Control.Monad.FD.Internal.HashMap.Strict as HashMap
 import Control.Monad.FD.Internal.Int
+import Control.Monad.FD.Internal.IntMap.Strict (IntMap, (!))
+import qualified Control.Monad.FD.Internal.IntMap.Strict as IntMap
+import Control.Monad.FD.Internal.IntSet (IntSet)
+import qualified Control.Monad.FD.Internal.IntSet as IntSet
 import Control.Monad.FD.Internal.Pruning (Pruning, affectedBy)
 import qualified Control.Monad.FD.Internal.Pruning as Pruning
 
@@ -88,25 +87,25 @@ runFDT m = unFDT m initS (liftM . (:) . fst') (return [])
 
 instance Functor (FDT s m) where
   fmap f m = FDT $ \ s sk fk ->
-    unFDT m s (\ (a :+: s') fk' -> sk (f a :+: s') fk') fk
+    unFDT m s (\ (a :*: s') fk' -> sk (f a :*: s') fk') fk
 
 instance Applicative (FDT s m) where
-  pure a = FDT $ \ s sk fk -> sk (a :+: s) fk
+  pure a = FDT $ \ s sk fk -> sk (a :*: s) fk
   f <*> a = FDT $ \ s sk fk ->
-    unFDT f s (\ (f' :+: s') fk' ->
-                unFDT a s' (\ (a' :+: s'') fk'' ->
-                             sk (f' a' :+: s'') fk'') fk') fk
+    unFDT f s (\ (f' :*: s') fk' ->
+                unFDT a s' (\ (a' :*: s'') fk'' ->
+                             sk (f' a' :*: s'') fk'') fk') fk
 
 instance Alternative (FDT s m) where
   empty = FDT $ \ _ _ fk -> fk
   m <|> n = FDT $ \ s sk fk -> unFDT m s sk (unFDT n s sk fk)
 
 instance Monad (FDT s m) where
-  return a = FDT $ \ s sk fk -> sk (a :+: s) fk
+  return a = FDT $ \ s sk fk -> sk (a :*: s) fk
   m >>= k = FDT $ \ s sk fk ->
-    unFDT m s (\ (a :+: s') fk' -> unFDT (k a) s' sk fk') fk
+    unFDT m s (\ (a :*: s') fk' -> unFDT (k a) s' sk fk') fk
   m >> n = FDT $ \ s sk fk ->
-    unFDT m s (\ (_ :+: s') fk' -> unFDT n s' sk fk') fk
+    unFDT m s (\ (_ :*: s') fk' -> unFDT n s' sk fk') fk
   fail _ = FDT $ \ _ _ fk -> fk
 
 instance MonadPlus (FDT s m) where
@@ -114,7 +113,7 @@ instance MonadPlus (FDT s m) where
   m `mplus` n = FDT $ \ s sk fk -> unFDT m s sk (unFDT n s sk fk)
 
 instance MonadTrans (FDT s) where
-  lift m = FDT $ \ s sk fk -> m >>= \ a -> sk (a :+: s) fk
+  lift m = FDT $ \ s sk fk -> m >>= \ a -> sk (a :*: s) fk
 
 instance MonadIO m => MonadIO (FDT s m) where
   liftIO = lift . liftIO
@@ -161,15 +160,15 @@ newtype Var (s :: Region) = Var { unwrapVar :: Int } deriving Eq
 newtype Var s = Var { unwrapVar :: Int } deriving Eq
 #endif
 
-instance Hashable (Var s) where
-  hashWithSalt salt = hashWithSalt salt . unwrapVar
+instance IsInt (Var s) where
+  toInt = unwrapVar
 
 freshVar :: FDT s m (Var s)
 freshVar = do
   s@S {..} <- get
   let x = Var varCount
   put s { varCount = varCount + 1
-        , vars = HashMap.insert x initVarS vars
+        , vars = IntMap.insert x initVarS vars
         }
   return x
 
@@ -241,7 +240,7 @@ tell is = do
   entailed <- newFlag
   forM_ is $ \ (x `In` r) -> do
     (m, a) <- getConditionalRangeVars r
-    case (HashSet.null m, HashSet.null a) of
+    case (IntSet.null m, IntSet.null a) of
       (True, antimonotone) ->
         readDomain x >>= retainRange r >>= maybe
         (unless antimonotone $ addPropagator x r m a entailed)
@@ -265,17 +264,17 @@ addPropagator x r m a entailed = do
   forM_ m $ \ x' ->
     whenPruned x' $ \ pruning ->
       when (Pruning.val `affectedBy` pruning) $
-        modifyMonotoneVars propagator $ HashSet.delete x'
+        modifyMonotoneVars propagator $ IntSet.delete x'
   forM_ a $ \ x' ->
     whenPruned x' $ \ pruning ->
       when (Pruning.val `affectedBy` pruning) $
-        modifyAntimonotoneVars propagator $ HashSet.delete x'
-  HashMap.forWithKeyM_ (rangeVars r) $ \ x' dependentPruning ->
+        modifyAntimonotoneVars propagator $ IntSet.delete x'
+  IntMap.forWithKeyM_ (rangeVars r) $ \ x' dependentPruning ->
     whenPruned x' $ \ pruning ->
       when (dependentPruning `affectedBy` pruning) $
         unlessMarked entailed $ do
           PropagatorS {..} <- readPropagator propagator
-          case (HashSet.null monotoneVars, HashSet.null antimonotoneVars) of
+          case (IntSet.null monotoneVars, IntSet.null antimonotoneVars) of
             (True, antimonotone) ->
               readDomain x >>= retainRange r >>= maybe
               (when antimonotone $ mark entailed)
@@ -304,7 +303,7 @@ assign x i = do
   writeDomain x $ Dom.singleton i
   pruned x Pruning.val
 
-type ConditionalVars s = (HashSet (Var s), HashSet (Var s))
+type ConditionalVars s = (IntSet (Var s), IntSet (Var s))
 
 getConditionalTermVars :: Term s -> FDT s m (ConditionalVars s)
 getConditionalTermVars t = case t of
@@ -329,10 +328,10 @@ getConditionalTermVars t = case t of
     | otherwise -> swap <$> getConditionalTermVars t'
   Min x -> do
     assigned <- isAssigned x
-    return (if assigned then mempty else HashSet.singleton x, mempty)
+    return (if assigned then mempty else IntSet.singleton x, mempty)
   Max x -> do
     assigned <- isAssigned x
-    return (mempty, if assigned then mempty else HashSet.singleton x)
+    return (mempty, if assigned then mempty else IntSet.singleton x)
 
 getConditionalRangeVars :: Range s -> FDT s m (ConditionalVars s)
 getConditionalRangeVars r = case r of
@@ -342,28 +341,28 @@ getConditionalRangeVars r = case r of
     return (g1 `mappend` s2, s1 `mappend` g2)
   Dom x -> do
     assigned <- isAssigned x
-    return (mempty, if assigned then mempty else HashSet.singleton x)
+    return (mempty, if assigned then mempty else IntSet.singleton x)
   Complement r' ->
     swap <$> getConditionalRangeVars r'
 
 isAssigned :: Var s -> FDT s m Bool
 isAssigned = fmap Dom.isVal . readDomain
 
-termVars :: Term s -> HashMap (Var s) Pruning
+termVars :: Term s -> IntMap (Var s) Pruning
 termVars t = case t of
-  Int _ -> HashMap.empty
-  t1 :+ t2 -> (HashMap.sunion `on` termVars) t1 t2
-  t1 :- t2 -> (HashMap.sunion `on` termVars) t1 t2
+  Int _ -> IntMap.empty
+  t1 :+ t2 -> (IntMap.sunion `on` termVars) t1 t2
+  t1 :- t2 -> (IntMap.sunion `on` termVars) t1 t2
   _ :* t' -> termVars t'
   t' `Quot` _ -> termVars t'
   t' `Div` _ -> termVars t'
-  Min x -> HashMap.singleton x Pruning.min
-  Max x -> HashMap.singleton x Pruning.max
+  Min x -> IntMap.singleton x Pruning.min
+  Max x -> IntMap.singleton x Pruning.max
 
-rangeVars :: Range s -> HashMap (Var s) Pruning
+rangeVars :: Range s -> IntMap (Var s) Pruning
 rangeVars r = case r of
-  t1 :.. t2 -> (HashMap.sunion `on` termVars) t1 t2
-  Dom x -> HashMap.singleton x Pruning.dom
+  t1 :.. t2 -> (IntMap.sunion `on` termVars) t1 t2
+  Dom x -> IntMap.singleton x Pruning.dom
   Complement r' -> rangeVars r'
 
 retainRange :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
@@ -424,7 +423,7 @@ readDomain = fmap domain . readVar
 
 modifyVar :: Var s -> (VarS s m -> VarS s m) -> FDT s m ()
 modifyVar x f = modify $ \ s@S {..} ->
-  s { vars = HashMap.adjust f x vars }
+  s { vars = IntMap.adjust f x vars }
 
 writeDomain :: Var s -> Dom -> FDT s m ()
 writeDomain x d = modifyVar x $ \ s@VarS {..} -> s { domain = d }
@@ -446,16 +445,16 @@ newtype Propagator s =
              } deriving Eq
 #endif
 
-instance Hashable (Propagator s) where
-  hashWithSalt salt = hashWithSalt salt . unwrapPropagator
+instance IsInt (Propagator s) where
+  toInt = unwrapPropagator
 
 data PropagatorS s =
   PropagatorS { monotoneVars :: !(MonotoneVars s)
               , antimonotoneVars :: !(AntimonotoneVars s)
               }
 
-type MonotoneVars s = HashSet (Var s)
-type AntimonotoneVars s = HashSet (Var s)
+type MonotoneVars s = IntSet (Var s)
+type AntimonotoneVars s = IntSet (Var s)
 
 newPropagator :: MonotoneVars s ->
                  AntimonotoneVars s ->
@@ -464,9 +463,9 @@ newPropagator m a = do
   s@S {..} <- get
   let x = Propagator propagatorCount
   put s { propagatorCount = propagatorCount + 1
-        , propagators = HashMap.insert x PropagatorS { monotoneVars = m
-                                                     , antimonotoneVars = a
-                                                     } propagators
+        , propagators = IntMap.insert x PropagatorS { monotoneVars = m
+                                                    , antimonotoneVars = a
+                                                    } propagators
         }
   return x
 
@@ -489,7 +488,7 @@ modifyPropagator :: Propagator s ->
                     (PropagatorS s -> PropagatorS s) ->
                     FDT s m ()
 modifyPropagator x f = modify $ \ s@S {..} ->
-  s { propagators = HashMap.adjust f x propagators }
+  s { propagators = IntMap.adjust f x propagators }
 
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 newtype Flag (s :: Region) = Flag { unwrapFlag :: Int } deriving Eq
@@ -497,26 +496,26 @@ newtype Flag (s :: Region) = Flag { unwrapFlag :: Int } deriving Eq
 newtype Flag s = Flag { unwrapFlag :: Int } deriving Eq
 #endif
 
-instance Hashable (Flag s) where
-  hashWithSalt salt = hashWithSalt salt . unwrapFlag
+instance IsInt (Flag s) where
+  toInt = unwrapFlag
 
 newFlag :: FDT s m (Flag s)
 newFlag = do
   s@S {..} <- get
   let flag = Flag flagCount
   put s { flagCount = flagCount + 1
-        , unmarkedFlags = HashSet.insert flag unmarkedFlags
+        , unmarkedFlags = IntSet.insert flag unmarkedFlags
         }
   return flag
 
 unlessMarked :: Flag s -> FDT s m () -> FDT s m ()
 unlessMarked flag m = do
-  unmarked <- HashSet.member flag <$> gets unmarkedFlags
+  unmarked <- IntSet.member flag <$> gets unmarkedFlags
   when unmarked m
 
 mark :: Flag s -> FDT s m ()
 mark flag = modify $ \ s@S {..} ->
-  s { unmarkedFlags = HashSet.delete flag unmarkedFlags }
+  s { unmarkedFlags = IntSet.delete flag unmarkedFlags }
 
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 data Region
@@ -524,11 +523,11 @@ data Region
 
 data S s m =
   S { varCount :: {-# UNPACK #-} !Int
-    , vars :: !(HashMap (Var s) (VarS s m))
+    , vars :: !(IntMap (Var s) (VarS s m))
     , propagatorCount :: {-# UNPACK #-} !Int
-    , propagators :: !(HashMap (Propagator s) (PropagatorS s))
+    , propagators :: !(IntMap (Propagator s) (PropagatorS s))
     , flagCount :: {-# UNPACK #-} !Int
-    , unmarkedFlags :: !(HashSet (Flag s))
+    , unmarkedFlags :: !(IntSet (Flag s))
     }
 
 initS :: S s m
@@ -541,22 +540,22 @@ initS =
     , unmarkedFlags = mempty
     }
 
-data PairS s m a = a :+: !(S s m)
+data PairS s m a = a :*: !(S s m)
 
 fst' :: PairS s m a -> a
-fst' (a :+: _) = a
+fst' (a :*: _) = a
 
 get :: FDT s m (S s m)
-get = FDT $ \ s sk fk -> sk (s :+: s) fk
+get = FDT $ \ s sk fk -> sk (s :*: s) fk
 
 put :: S s m -> FDT s m ()
-put s = s `seq` FDT $ \ _ sk fk -> sk (() :+: s) fk
+put s = s `seq` FDT $ \ _ sk fk -> sk (() :*: s) fk
 
 modify :: (S s m -> S s m) -> FDT s m ()
-modify f = FDT $ \ s sk fk -> flip sk fk $! () :+: f s
+modify f = FDT $ \ s sk fk -> flip sk fk $! () :*: f s
 
 gets :: (S s m -> a) -> FDT s m a
-gets f = FDT $ \ s sk fk -> sk (f s :+: s) fk
+gets f = FDT $ \ s sk fk -> sk (f s :*: s) fk
 
 whenNothing :: Monad m => Maybe a -> m () -> m ()
 whenNothing p m = maybe m (const $ return ()) p
