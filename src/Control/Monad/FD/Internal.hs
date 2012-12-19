@@ -249,7 +249,7 @@ tell is = do
         readDomain x >>= retainRange r >>= maybe
         (unless antimonotone $ addPropagator x r m a entailed)
         (\ (dom', pruning) -> do
-            when (Dom.null dom') mzero
+            when (Dom.null dom') empty
             addPropagator x r m a entailed
             writeDomain x dom'
             pruned x pruning
@@ -284,7 +284,7 @@ addPropagator x r m a entailed = do
               readDomain x >>= retainRange r >>= maybe
               (when antimonotone $ mark entailed)
               (\ (dom', pruning') -> do
-                  when (Dom.null dom') mzero
+                  when (Dom.null dom') empty
                   writeDomain x dom'
                   pruned x pruning')
             (False, True) ->
@@ -297,9 +297,9 @@ label :: Var s -> FDT s m Int
 label x = do
   dom' <- readDomain x
   case Dom.toList dom' of
-    [] -> mzero
+    [] -> empty
     [i] -> return i
-    (i:j:is) -> assignTo i `mplus` assignTo j `mplus` msum (map assignTo is)
+    (i:j:is) -> assignTo i <|> assignTo j <|> msum (map assignTo is)
   where
     assignTo i = do
       writeDomain x $ Dom.singleton i
@@ -414,11 +414,11 @@ getVal t = case t of
   t1 :+ t2 -> (+!) <$> getVal t1 <*> getVal t2
   t1 :- t2 -> (-!) <$> getVal t1 <*> getVal t2
   x :* t' -> (x *!) <$> getVal t'
-  _ `Quot` 0 -> mzero
+  _ `Quot` 0 -> empty
   t' `Quot` x -> (`quot` x) <$> getVal t'
-  _ `Div` 0 -> mzero
+  _ `Div` 0 -> empty
   t' `Div` x -> (`div` x) <$> getVal t'
-  _ `Div'` 0 -> mzero
+  _ `Div'` 0 -> empty
   t' `Div'` x -> (`div'` x) <$> getVal t'
   Min x -> Dom.findMin <$> readDomain x
   Max x -> Dom.findMax <$> readDomain x

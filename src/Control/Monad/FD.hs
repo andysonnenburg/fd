@@ -26,7 +26,7 @@ module Control.Monad.FD
 
 import Control.Applicative
 import Control.Arrow
-import Control.Monad (guard, liftM, liftM2)
+import Control.Monad (guard)
 
 import Data.Monoid (mempty)
 import Data.Tuple (swap)
@@ -50,7 +50,7 @@ type Addend = Int
 type Divisor = Int
 
 freshTerm :: FDT s m (Term s)
-freshTerm = liftM fromVar freshVar
+freshTerm = fromVar <$> freshVar
 
 fromVar :: Var s -> Term s
 fromVar = flip Term 0 . flip IntMap.singleton 1
@@ -164,7 +164,7 @@ label :: Term s -> FDT s m Int
 label (Term x y) =
   IntMap.foldlWithKey' f (return $ fromIntegral y) x
   where
-    f a k v = liftM2 (+) a $ liftM (v *) $ Internal.label k
+    f a k v = (+) <$> a <*> ((v *) <$> Internal.label k)
 
 fromIntegral :: (Prelude.Integral a, Additive b) => a -> b
 fromIntegral = fromInteger . Prelude.toInteger
