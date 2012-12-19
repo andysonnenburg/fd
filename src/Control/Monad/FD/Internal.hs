@@ -46,21 +46,21 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Logic (LogicT, observeAllT)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
-import Data.Foldable (forM_, mapM_)
+import Data.Foldable (forM_, sequence_)
 import Data.Function (on)
 import Data.Functor.Identity
 import Data.Monoid (mappend, mempty)
 import Data.Sequence (Seq, (|>))
+import qualified Data.Sequence as Sequence
 import Data.Tuple (swap)
 
 import Prelude hiding (Fractional (..),
                        Integral (..),
                        Num (..),
-                       mapM_,
                        max,
                        min,
+                       sequence_,
                        subtract)
-import Prelude (toInteger)
 import qualified Prelude
 
 import Control.Monad.FD.Internal.Dom (Dom)
@@ -252,7 +252,8 @@ tell is = do
             when (Dom.null dom') mzero
             addPropagator x r m a entailed
             writeDomain x dom'
-            pruned x pruning)
+            pruned x pruning
+            propagate)
       (False, True) ->
         readDomain x >>= retainRange r >>=
         flip unlessNothing (addPropagator x r m a entailed)
@@ -303,6 +304,7 @@ label x = do
     assignTo i = do
       writeDomain x $ Dom.singleton i
       pruned x Pruning.val
+      propagate
       return i
 
 type ConditionalVars s = (IntSet (Var s), IntSet (Var s))
@@ -394,7 +396,17 @@ deleteRange (Complement r) dom' =
   retainRange r dom'
 
 pruned :: Var s -> Pruning -> FDT s m ()
-pruned x pruning = readListeners x >>= mapM_ ($ pruning)
+pruned x pruning =
+  readListeners x >>= \ listeners ->
+  modify $ \ s@S {..} ->
+  s { propagations = propagations `mappend` (($ pruning) <$> listeners) }
+
+propagate :: FDT s m ()
+propagate = do
+  s <- get
+  put s { propagations = mempty }
+  sequence_ $ propagations s
+  Sequence.null <$> gets propagations >>= flip unless propagate
 
 getVal :: Term s -> FDT s m Int
 getVal t = case t of
@@ -536,6 +548,7 @@ data S s m =
     , propagators :: !(IntMap (Propagator s) (PropagatorS s))
     , flagCount :: {-# UNPACK #-} !Int
     , unmarkedFlags :: !(IntSet (Flag s))
+    , propagations :: !(Seq (FDT s m ()))
     }
 
 initS :: S s m
@@ -546,6 +559,7 @@ initS =
     , propagators = mempty
     , flagCount = 0
     , unmarkedFlags = mempty
+    , propagations = mempty
     }
 
 whenNothing :: Monad m => Maybe a -> m () -> m ()
