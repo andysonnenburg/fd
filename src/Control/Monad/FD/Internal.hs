@@ -8,11 +8,9 @@
 {-# LANGUAGE
     FunctionalDependencies
   , MultiParamTypeClasses
+  , NamedFieldPuns
   , Rank2Types
   , RecordWildCards #-}
-#ifdef LANGUAGE_Trustworthy
-{-# LANGUAGE Trustworthy #-}
-#endif
 module Control.Monad.FD.Internal
        ( FD
        , runFD
@@ -41,11 +39,11 @@ module Control.Monad.FD.Internal
 
 import Control.Applicative
 import Control.Monad (MonadPlus (mplus, mzero),
-                      liftM,
                       msum,
                       unless,
                       when)
 import Control.Monad.IO.Class (MonadIO (liftIO))
+import Control.Monad.Logic (LogicT, observeAllT)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (forM_, mapM_)
@@ -74,6 +72,8 @@ import Control.Monad.FD.Internal.IntSet (IntSet)
 import qualified Control.Monad.FD.Internal.IntSet as IntSet
 import Control.Monad.FD.Internal.Pruning (Pruning, affectedBy)
 import qualified Control.Monad.FD.Internal.Pruning as Pruning
+import Control.Monad.FD.Internal.State (StateT, evalStateT)
+import qualified Control.Monad.FD.Internal.State as State
 
 type FD s = FDT s Identity
 
@@ -81,41 +81,34 @@ runFD :: (forall s . FD s a) -> [a]
 runFD = runIdentity . runFDT
 
 newtype FDT s m a =
-  FDT { unFDT :: forall r . S s m -> (PairS s m a -> m r -> m r) -> m r -> m r
+  FDT { unFDT :: StateT (S s m) (LogicT m) a
       }
 
 runFDT :: Monad m => (forall s . FDT s m a) -> m [a]
-runFDT m = unFDT m initS (liftM . (:) . fst') (return [])
+runFDT m = observeAllT $ evalStateT (unFDT m) initS
 
 instance Functor (FDT s m) where
-  fmap f m = FDT $ \ s sk fk ->
-    unFDT m s (\ (a :*: s') fk' -> sk (f a :*: s') fk') fk
+  fmap f = FDT . fmap f . unFDT
 
 instance Applicative (FDT s m) where
-  pure a = FDT $ \ s sk fk -> sk (a :*: s) fk
-  f <*> a = FDT $ \ s sk fk ->
-    unFDT f s (\ (f' :*: s') fk' ->
-                unFDT a s' (\ (a' :*: s'') fk'' ->
-                             sk (f' a' :*: s'') fk'') fk') fk
+  pure = FDT . pure
+  f <*> a = FDT $ unFDT f <*> unFDT a
 
 instance Alternative (FDT s m) where
-  empty = FDT $ \ _ _ fk -> fk
-  m <|> n = FDT $ \ s sk fk -> unFDT m s sk (unFDT n s sk fk)
+  empty = FDT empty
+  m <|> n = FDT $ unFDT m <|> unFDT n
 
 instance Monad (FDT s m) where
-  return a = FDT $ \ s sk fk -> sk (a :*: s) fk
-  m >>= k = FDT $ \ s sk fk ->
-    unFDT m s (\ (a :*: s') fk' -> unFDT (k a) s' sk fk') fk
-  m >> n = FDT $ \ s sk fk ->
-    unFDT m s (\ (_ :*: s') fk' -> unFDT n s' sk fk') fk
-  fail _ = FDT $ \ _ _ fk -> fk
+  return = FDT . return
+  m >>= k = FDT $ unFDT m >>= (unFDT . k)
+  fail = FDT . fail
 
 instance MonadPlus (FDT s m) where
-  mzero = FDT $ \ _ _ fk -> fk
-  m `mplus` n = FDT $ \ s sk fk -> unFDT m s sk (unFDT n s sk fk)
+  mzero = FDT mzero
+  m `mplus` n = FDT $ unFDT m `mplus` unFDT n
 
 instance MonadTrans (FDT s) where
-  lift m = FDT $ \ s sk fk -> m >>= \ a -> sk (a :*: s) fk
+  lift = FDT . lift . lift
 
 instance MonadIO m => MonadIO (FDT s m) where
   liftIO = lift . liftIO
@@ -307,12 +300,10 @@ label x = do
     [i] -> return i
     (i:j:is) -> assignTo i `mplus` assignTo j `mplus` msum (map assignTo is)
   where
-    assignTo i = assign x i >> return i
-
-assign :: Var s -> Int -> FDT s m ()
-assign x i = do
-  writeDomain x $ Dom.singleton i
-  pruned x Pruning.val
+    assignTo i = do
+      writeDomain x $ Dom.singleton i
+      pruned x Pruning.val
+      return i
 
 type ConditionalVars s = (IntSet (Var s), IntSet (Var s))
 
@@ -443,12 +434,12 @@ modifyVar x f = modify $ \ s@S {..} ->
   s { vars = IntMap.adjust f x vars }
 
 writeDomain :: Var s -> Dom -> FDT s m ()
-writeDomain x d = modifyVar x $ \ s@VarS {..} -> s { domain = d }
+writeDomain x domain = modifyVar x $ \ s -> s { domain }
 
 readListeners :: Var s -> FDT s m (Seq (Listener s m))
 readListeners = fmap listeners . readVar
 
-whenPruned :: Var s -> (Pruning -> FDT s m ()) -> FDT s m ()
+whenPruned :: Var s -> Listener s m -> FDT s m ()
 whenPruned x listener = modifyVar x $ \ s@VarS {..} ->
   s { listeners = listeners |> listener }
 
@@ -557,25 +548,20 @@ initS =
     , unmarkedFlags = mempty
     }
 
-data PairS s m a = a :*: !(S s m)
-
-fst' :: PairS s m a -> a
-fst' (a :*: _) = a
-
-get :: FDT s m (S s m)
-get = FDT $ \ s sk fk -> sk (s :*: s) fk
-
-put :: S s m -> FDT s m ()
-put s = s `seq` FDT $ \ _ sk fk -> sk (() :*: s) fk
-
-modify :: (S s m -> S s m) -> FDT s m ()
-modify f = FDT $ \ s sk fk -> flip sk fk $! () :*: f s
-
-gets :: (S s m -> a) -> FDT s m a
-gets f = FDT $ \ s sk fk -> sk (f s :*: s) fk
-
 whenNothing :: Monad m => Maybe a -> m () -> m ()
 whenNothing p m = maybe m (const $ return ()) p
 
 unlessNothing :: Monad m => Maybe a -> m () -> m ()
 unlessNothing p m = maybe (return ()) (const m) p
+
+get :: FDT s m (S s m)
+get = FDT State.get
+
+put :: S s m -> FDT s m ()
+put = FDT . State.put
+
+modify :: (S s m -> S s m) -> FDT s m ()
+modify = FDT . State.modify
+
+gets :: (S s m -> a) -> FDT s m a
+gets = FDT . State.gets

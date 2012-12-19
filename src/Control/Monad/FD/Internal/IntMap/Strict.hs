@@ -30,7 +30,7 @@ newtype IntMap k v = IntMap { unIntMap :: IntMap.IntMap (Pair k v) }
 data Pair a b = !a :*: !b
 
 instance Semigroup b => Semigroup (Pair a b) where
-  k :*: a <> _ :*: b = k :*: (a <> b)
+  (k :*: a) <> (_ :*: b) = k :*: (a <> b)
 
 (!) :: IsInt k => IntMap k v -> k -> v
 m!k = case unIntMap m IntMap.! toInt k of
@@ -57,7 +57,7 @@ foldlWithKey' f a0 = foldl' f' a0 . unIntMap
 foldrWithKey :: (k -> v -> b -> b) -> b -> IntMap k v -> b
 foldrWithKey f b0 = foldr f' b0 . unIntMap
   where
-    f' (k :*: v) b = f k v b
+    f' (k :*: v) = f k v
 
 forWithKeyM_ :: Monad m => IntMap k v -> (k -> v -> m b) -> m ()
 forWithKeyM_ xs f = foldrWithKey (\ k v a -> f k v >> a) (return ()) xs
