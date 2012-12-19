@@ -4,6 +4,7 @@ module Control.Monad.FD.Internal.IntMap.Strict
        , adjust
        , delete
        , empty
+       , filter
        , foldlWithKey'
        , foldrWithKey
        , forWithKeyM_
@@ -20,7 +21,7 @@ import qualified Data.IntMap.Strict as IntMap
 import Data.Foldable (Foldable (foldMap), foldl', foldr)
 import Data.Semigroup
 
-import Prelude hiding (foldl, foldr, fst, null, snd)
+import Prelude hiding (filter, foldl, foldr, fst, null, snd)
 
 import Control.Monad.FD.Internal.Int
 
@@ -44,19 +45,19 @@ delete k = IntMap . IntMap.delete (toInt k) . unIntMap
 
 empty :: IntMap k v
 empty = IntMap IntMap.empty
-{-# INLINE empty #-}
+
+filter :: (v -> Bool) -> IntMap k v -> IntMap k v
+filter f = IntMap . IntMap.filter (\ (_ :*: v) -> f v) . unIntMap
 
 foldlWithKey' :: (a -> k -> v -> a) -> a -> IntMap k v -> a
 foldlWithKey' f a0 = foldl' f' a0 . unIntMap
   where
     f' a (k :*: v) = f a k v
-{-# INLINE foldlWithKey' #-}
 
 foldrWithKey :: (k -> v -> b -> b) -> b -> IntMap k v -> b
 foldrWithKey f b0 = foldr f' b0 . unIntMap
   where
     f' (k :*: v) b = f k v b
-{-# INLINE foldrWithKey #-}
 
 forWithKeyM_ :: Monad m => IntMap k v -> (k -> v -> m b) -> m ()
 forWithKeyM_ xs f = foldrWithKey (\ k v a -> f k v >> a) (return ()) xs
@@ -69,11 +70,9 @@ member k = IntMap.member (toInt k) . unIntMap
 
 null :: IntMap k v -> Bool
 null = IntMap.null . unIntMap
-{-# INLINE null #-}
 
 singleton :: IsInt k => k -> v -> IntMap k v
 singleton k = IntMap . IntMap.singleton (toInt k) . (k :*:)
-{-# INLINE singleton #-}
 
 sunion :: (IsInt k, Semigroup v) => IntMap k v -> IntMap k v -> IntMap k v
 sunion xs ys = IntMap $ IntMap.unionWith (<>) (unIntMap xs) (unIntMap ys)
@@ -81,7 +80,7 @@ sunion xs ys = IntMap $ IntMap.unionWith (<>) (unIntMap xs) (unIntMap ys)
 toList :: IntMap k v -> [(k, v)]
 toList = map (\ (a :*: b) -> (a, b)) . IntMap.elems . unIntMap
 
-unionWith :: IsInt k => (v -> v -> v) -> IntMap k v -> IntMap k v -> IntMap k v
+unionWith :: (v -> v -> v) -> IntMap k v -> IntMap k v -> IntMap k v
 unionWith f xs ys = IntMap $ IntMap.unionWith f' (unIntMap xs) (unIntMap ys)
   where
     f' (k :*: a) (_ :*: b) = k :*: f a b

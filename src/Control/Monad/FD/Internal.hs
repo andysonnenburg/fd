@@ -19,6 +19,7 @@ module Control.Monad.FD.Internal
        , FDT
        , runFDT
        , Additive (..)
+       , subtract
        , Multiplicative (..)
        , Integral (..)
        , Fractional (..)
@@ -57,9 +58,10 @@ import Data.Tuple (swap)
 import Prelude hiding (Fractional (..),
                        Integral (..),
                        Num (..),
-                       max,
                        mapM_,
-                       min)
+                       max,
+                       min,
+                       subtract)
 import Prelude (toInteger)
 import qualified Prelude
 
@@ -129,6 +131,9 @@ class Additive a where
   negate = (fromInteger 0 -)
   fromInteger :: Integer -> a
 
+subtract :: Additive a => a -> a -> a
+subtract = flip (-)
+
 class Multiplicative a b c | a b -> c, a c -> b, b c -> a where
   (*) :: a -> b -> c
 
@@ -137,6 +142,7 @@ class ( Multiplicative a b a
       ) => Integral a b where
   quot :: a -> b -> a
   div :: a -> b -> a
+  div' :: a -> b -> a
 
 class Multiplicative a b c => Fractional a b c where
   (/) :: a -> b -> c
@@ -153,6 +159,9 @@ instance Multiplicative Int Int Int where
 instance Integral Int Int where
   quot = Prelude.quot
   div = Prelude.div
+  n `div'` d = if Prelude.signum r == Prelude.signum d then q + 1 else q
+    where
+      (q, r) = Prelude.quotRem n d
 
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 newtype Var (s :: Region) = Var { unwrapVar :: Int } deriving Eq
@@ -180,6 +189,7 @@ data Term s
   | {-# UNPACK #-} !Int :* !(Term s)
   | !(Term s) `Quot` {-# UNPACK #-} !Int
   | !(Term s) `Div` {-# UNPACK #-} !Int
+  | !(Term s) `Div'` {-# UNPACK #-} !Int
   | Int {-# UNPACK #-} !Int
   | Min !(Var s)
   | Max !(Var s)
@@ -203,6 +213,7 @@ instance Multiplicative (Term s) Int (Term s) where
 instance Integral (Term s) Int where
   quot = Quot
   div = Div
+  div' = Div'
 
 fromInt :: Int -> Term s
 fromInt = Int
@@ -326,6 +337,9 @@ getConditionalTermVars t = case t of
   t' `Div` x
     | x >= 0 -> getConditionalTermVars t'
     | otherwise -> swap <$> getConditionalTermVars t'
+  t' `Div'` x
+    | x >= 0 -> getConditionalTermVars t'
+    | otherwise -> swap <$> getConditionalTermVars t'
   Min x -> do
     assigned <- isAssigned x
     return (if assigned then mempty else IntSet.singleton x, mempty)
@@ -356,6 +370,7 @@ termVars t = case t of
   _ :* t' -> termVars t'
   t' `Quot` _ -> termVars t'
   t' `Div` _ -> termVars t'
+  t' `Div'` _ -> termVars t'
   Min x -> IntMap.singleton x Pruning.min
   Max x -> IntMap.singleton x Pruning.max
 
@@ -400,6 +415,8 @@ getVal t = case t of
   t' `Quot` x -> (`quot` x) <$> getVal t'
   _ `Div` 0 -> mzero
   t' `Div` x -> (`div` x) <$> getVal t'
+  _ `Div'` 0 -> mzero
+  t' `Div'` x -> (`div'` x) <$> getVal t'
   Min x -> Dom.findMin <$> readDomain x
   Max x -> Dom.findMax <$> readDomain x
 
