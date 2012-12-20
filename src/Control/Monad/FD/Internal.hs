@@ -268,15 +268,15 @@ addPropagator :: Var s -> Range s ->
 addPropagator x r m a entailed = do
   propagator <- newPropagator m a
   forM_ m $ \ x' ->
-    whenPruned x' $ \ pruning _ ->
+    whenPruned x' $ \ (Event pruning _) ->
       when (Pruning.val `affectedBy` pruning) $
         modifyMonotoneVars propagator $ IntSet.delete x'
   forM_ a $ \ x' ->
-    whenPruned x' $ \ pruning _ ->
+    whenPruned x' $ \ (Event pruning _) ->
       when (Pruning.val `affectedBy` pruning) $
         modifyAntimonotoneVars propagator $ IntSet.delete x'
   IntMap.forWithKeyM_ (rangeVars r) $ \ x' dependentPruning ->
-    whenPruned x' $ \ pruning time ->
+    whenPruned x' $ \ (Event pruning time) ->
       when (dependentPruning `affectedBy` pruning) $
         unlessMarked entailed $ do
           PropagatorS {..} <- readPropagator propagator
@@ -400,20 +400,20 @@ deleteRange (Complement r) dom' =
 
 pruned :: Var s -> Pruning -> FDT s m ()
 pruned x pruning = do
-  tick
-  modify $ \ s@S {..} ->
+  modify $ \ s@S { events, currentTime = time } ->
     let f Nothing =
           Just $ Event pruning currentTime
         f (Just (Event pruning' _)) =
           Just $ Event (pruning <> pruning') currentTime
-    in s { events = IntMap.alter f x events }
+        currentTime = succ time
+    in s { events = IntMap.alter f x events, currentTime }
 
 propagateEvents :: FDT s m ()
 propagateEvents = do
   s <- get
   put s { events = mempty }
-  IntMap.forWithKeyM_ (events s) $ \ x (Event pruning time) ->
-    readListeners x >>= mapM_ (\ listener -> listener pruning time)
+  IntMap.forWithKeyM_ (events s) $ \ x event ->
+    readEventListeners x >>= mapM_ ($ event)
   IntMap.null <$> gets events >>= flip unless propagateEvents
 
 getVal :: Term s -> FDT s m Int
@@ -433,14 +433,14 @@ getVal t = case t of
 
 data VarS s m =
   VarS { domain :: !Dom
-       , listeners :: !(Seq (Listener s m))
+       , eventListeners :: !(Seq (EventListener s m))
        }
 
-type Listener s m = Pruning -> Time -> FDT s m ()
+type EventListener s m = Event -> FDT s m ()
 
 initVarS :: VarS s m
 initVarS = VarS { domain = Dom.full
-                , listeners = mempty
+                , eventListeners = mempty
                 }
 
 readVar :: Var s -> FDT s m (VarS s m)
@@ -456,12 +456,12 @@ modifyVar x f = modify $ \ s@S {..} ->
 writeDomain :: Var s -> Dom -> FDT s m ()
 writeDomain x domain = modifyVar x $ \ s -> s { domain }
 
-readListeners :: Var s -> FDT s m (Seq (Listener s m))
-readListeners = fmap listeners . readVar
+readEventListeners :: Var s -> FDT s m (Seq (EventListener s m))
+readEventListeners = fmap eventListeners . readVar
 
-whenPruned :: Var s -> Listener s m -> FDT s m ()
-whenPruned x listener = modifyVar x $ \ s@VarS {..} ->
-  s { listeners = listeners |> listener }
+whenPruned :: Var s -> EventListener s m -> FDT s m ()
+whenPruned x eventListener = modifyVar x $ \ s@VarS {..} ->
+  s { eventListeners = eventListeners |> eventListener }
 
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 newtype Propagator (s :: Region) =
@@ -479,7 +479,7 @@ instance IsInt (Propagator s) where
 data PropagatorS s =
   PropagatorS { monotoneVars :: !(MonotoneVars s)
               , antimonotoneVars :: !(AntimonotoneVars s)
-              , propagatorTime :: !Time
+              , propagatorTime :: {-#UNPACK #-} !Time
               }
 
 type MonotoneVars s = IntSet (Var s)
@@ -547,15 +547,12 @@ mark :: Flag s -> FDT s m ()
 mark flag = modify $ \ s@S {..} ->
   s { unmarkedFlags = IntSet.delete flag unmarkedFlags }
 
-data Event = Event !Pruning !Time
+data Event = Event !Pruning {-# UNPACK #-} !Time
 
 type Time = Int
 
 startTime :: Time
 startTime = minBound
-
-tick :: FDT s m ()
-tick = modify $ \ s@S {..} -> s { currentTime = succ currentTime }
 
 stampPropagator :: Propagator s -> FDT s m ()
 stampPropagator x = do
@@ -574,7 +571,7 @@ data S s m =
     , flagCount :: {-# UNPACK #-} !Int
     , unmarkedFlags :: !(IntSet (Flag s))
     , events :: !(IntMap (Var s) Event)
-    , currentTime :: Time
+    , currentTime :: {-# UNPACK #-} !Time
     }
 
 initS :: S s m
