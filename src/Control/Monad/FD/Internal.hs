@@ -20,7 +20,6 @@ module Control.Monad.FD.Internal
        , subtract
        , Multiplicative (..)
        , Integral (..)
-       , Fractional (..)
        , Var
        , freshVar
        , Term
@@ -54,8 +53,7 @@ import Data.Semigroup ((<>))
 import Data.Sequence (Seq, (|>))
 import Data.Tuple (swap)
 
-import Prelude hiding (Fractional (..),
-                       Integral (..),
+import Prelude hiding (Integral (..),
                        Num (..),
                        mapM_,
                        max,
@@ -137,9 +135,6 @@ class ( Multiplicative a b a
   quot :: a -> b -> a
   div :: a -> b -> a
   div' :: a -> b -> a
-
-class Multiplicative a b c => Fractional a b c where
-  (/) :: a -> b -> c
 
 instance Additive Int where
   (+) = (Prelude.+)

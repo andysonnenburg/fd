@@ -12,8 +12,6 @@ module Control.Monad.FD
        , fromInt
        , Additive (..)
        , Multiplicative (..)
-       , Integral (..)
-       , Fractional (..)
        , (#=)
        , (#/=)
        , (#<)
@@ -44,7 +42,6 @@ import Control.Monad.FD.Internal.IntMap.Strict (IntMap)
 import qualified Control.Monad.FD.Internal.IntMap.Strict as IntMap
 
 data Term s = Term !(IntMap (Var s) Factor) {-# UNPACK #-} !Addend
-
 type Factor = Int
 type Addend = Int
 type Divisor = Int
@@ -157,8 +154,12 @@ bounds xs c a =
   IntMap.foldrWithKey f (pair $ fromIntegral $ negate c) xs
   where
     f x v
-      | v >= 0 = (+ (-v) * Internal.max x) *** (+ (-v) * Internal.min x)
-      | otherwise = (+ (-v) * Internal.min x) *** (+ (-v) * Internal.max x)
+      | v >= 0 =
+        (+ (-v) * Internal.max x) *** (+ (-v) * Internal.min x)
+      | v /= (-1) =
+        (+ (-v) * Internal.min x) *** (+ (-v) * Internal.max x)
+      | otherwise =
+        (+ Internal.min x) *** (+ Internal.max x)
 
 label :: Term s -> FDT s m Int
 label (Term x y) =
