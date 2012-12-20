@@ -2,6 +2,7 @@ module Control.Monad.FD.Internal.IntMap.Strict
        ( IntMap
        , (!)
        , adjust
+       , alter
        , delete
        , empty
        , filter
@@ -19,7 +20,8 @@ module Control.Monad.FD.Internal.IntMap.Strict
 
 import qualified Data.IntMap.Strict as IntMap
 import Data.Foldable (Foldable (foldMap), foldl', foldr)
-import Data.Semigroup
+import Data.Monoid (Monoid (mappend, mconcat, mempty))
+import Data.Semigroup (Semigroup ((<>)))
 
 import Prelude hiding (filter, foldl, foldr, fst, null, snd)
 
@@ -39,6 +41,16 @@ m!k = case unIntMap m IntMap.! toInt k of
 adjust :: IsInt k => (v -> v) -> k -> IntMap k v -> IntMap k v
 adjust f k m =
   IntMap $ IntMap.adjust (\ (a :*: b) -> a :*: f b) (toInt k) (unIntMap m)
+
+alter :: IsInt k => (Maybe v -> Maybe v) -> k -> IntMap k v -> IntMap k v
+alter f k = IntMap . IntMap.alter f' (toInt k) . unIntMap
+  where
+    f' Nothing = case f Nothing of
+      Nothing -> Nothing
+      Just v -> Just $ k :*: v
+    f' (Just (k' :*: v)) = case f (Just v) of
+      Nothing -> Nothing
+      Just v' -> Just $ k' :*: v'
 
 delete :: IsInt k => k -> IntMap k v -> IntMap k v
 delete k = IntMap . IntMap.delete (toInt k) . unIntMap
@@ -84,6 +96,9 @@ unionWith :: (v -> v -> v) -> IntMap k v -> IntMap k v -> IntMap k v
 unionWith f xs ys = IntMap $ IntMap.unionWith f' (unIntMap xs) (unIntMap ys)
   where
     f' (k :*: a) (_ :*: b) = k :*: f a b
+
+instance Semigroup (IntMap k v) where
+  a <> b = IntMap $ unIntMap a <> unIntMap b
 
 instance Monoid (IntMap k v) where
   mempty = IntMap mempty

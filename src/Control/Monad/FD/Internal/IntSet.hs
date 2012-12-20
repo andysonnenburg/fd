@@ -8,7 +8,8 @@ module Control.Monad.FD.Internal.IntSet
        ) where
 
 import Data.Foldable
-import Data.Monoid
+import Data.Monoid (Monoid (mappend, mconcat, mempty))
+import Data.Semigroup (Semigroup ((<>)))
 
 import Prelude hiding (foldl, foldr, null)
 
@@ -34,6 +35,9 @@ null = IntMap.null . unIntSet
 singleton :: IsInt a => a -> IntSet a
 singleton x = IntSet $ IntMap.singleton x x
 {-# INLINE singleton #-}
+
+instance Semigroup (IntSet a) where
+  a <> b = IntSet $ unIntSet a <> unIntSet b
 
 instance Monoid (IntSet a) where
   mempty = IntSet mempty
