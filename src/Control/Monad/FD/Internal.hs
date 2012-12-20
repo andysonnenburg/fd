@@ -405,8 +405,8 @@ pruned x pruning = do
           Just $ Event pruning currentTime
         f (Just (Event pruning' _)) =
           Just $ Event (pruning <> pruning') currentTime
-        currentTime = succ time
-    in s { events = IntMap.alter f x events, currentTime }
+        currentTime = succ time in
+    s { events = IntMap.alter f x events, currentTime }
 
 propagateEvents :: FDT s m ()
 propagateEvents = do
