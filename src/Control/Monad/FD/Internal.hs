@@ -236,10 +236,10 @@ in' :: Var s -> Range s -> Indexical s
 in' = In
 
 tell :: [Indexical s] -> FDT s m ()
-tell is = do
+tell indexicals = do
   entailed <- newFlag
-  forM_ is $ \ (x `In` r) -> do
-    (m, a) <- getConditionalRangeVars r
+  forM_ indexicals $ \ (x `In` r) -> do
+    (m, a) <- getMonotonicityRangeVars r
     case (IntSet.null m, IntSet.null a) of
       (True, antimonotone) ->
         readDomain x >>= retainRange r >>= maybe
@@ -303,32 +303,32 @@ label x = do
       propagatePrunings
       return i
 
-type ConditionalVars s = (IntSet (Var s), IntSet (Var s))
+type MonotonicityVars s = (MonotoneVars s, AntimonotoneVars s)
 
-getConditionalTermVars :: Term s -> FDT s m (ConditionalVars s)
-getConditionalTermVars t = case t of
+getMonotonicityTermVars :: Term s -> FDT s m (MonotonicityVars s)
+getMonotonicityTermVars t = case t of
   Int _ ->
     return mempty
   t1 :+ t2 -> do
-    (s1, g1) <- getConditionalTermVars t1
-    (s2, g2) <- getConditionalTermVars t2
+    (s1, g1) <- getMonotonicityTermVars t1
+    (s2, g2) <- getMonotonicityTermVars t2
     return (s1 <> s2, g1 <> g2)
   t1 :- t2 -> do
-    (s1, g1) <- getConditionalTermVars t1
-    (s2, g2) <- getConditionalTermVars t2
+    (s1, g1) <- getMonotonicityTermVars t1
+    (s2, g2) <- getMonotonicityTermVars t2
     return (s1 <> g2, g1 <> s2)
   x :* t'
-    | x >= 0 -> getConditionalTermVars t'
-    | otherwise -> swap <$> getConditionalTermVars t'
+    | x >= 0 -> getMonotonicityTermVars t'
+    | otherwise -> swap <$> getMonotonicityTermVars t'
   t' `Quot` x
-    | x >= 0 -> getConditionalTermVars t'
-    | otherwise -> swap <$> getConditionalTermVars t'
+    | x >= 0 -> getMonotonicityTermVars t'
+    | otherwise -> swap <$> getMonotonicityTermVars t'
   t' `Div` x
-    | x >= 0 -> getConditionalTermVars t'
-    | otherwise -> swap <$> getConditionalTermVars t'
+    | x >= 0 -> getMonotonicityTermVars t'
+    | otherwise -> swap <$> getMonotonicityTermVars t'
   t' `Div'` x
-    | x >= 0 -> getConditionalTermVars t'
-    | otherwise -> swap <$> getConditionalTermVars t'
+    | x >= 0 -> getMonotonicityTermVars t'
+    | otherwise -> swap <$> getMonotonicityTermVars t'
   Min x -> do
     assigned <- isAssigned x
     return (if assigned then mempty else IntSet.singleton x, mempty)
@@ -336,17 +336,17 @@ getConditionalTermVars t = case t of
     assigned <- isAssigned x
     return (mempty, if assigned then mempty else IntSet.singleton x)
 
-getConditionalRangeVars :: Range s -> FDT s m (ConditionalVars s)
-getConditionalRangeVars r = case r of
+getMonotonicityRangeVars :: Range s -> FDT s m (MonotonicityVars s)
+getMonotonicityRangeVars r = case r of
   t1 :.. t2 -> do
-    (s1, g1) <- getConditionalTermVars t1
-    (s2, g2) <- getConditionalTermVars t2
+    (s1, g1) <- getMonotonicityTermVars t1
+    (s2, g2) <- getMonotonicityTermVars t2
     return (g1 <> s2, s1 <> g2)
   Dom x -> do
     assigned <- isAssigned x
     return (mempty, if assigned then mempty else IntSet.singleton x)
   Complement r' ->
-    swap <$> getConditionalRangeVars r'
+    swap <$> getMonotonicityRangeVars r'
 
 isAssigned :: Var s -> FDT s m Bool
 isAssigned = fmap Dom.isVal . readDomain
