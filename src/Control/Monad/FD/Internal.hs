@@ -249,7 +249,7 @@ tell is = do
             addPropagator x r m a entailed
             writeDomain x dom'
             pruned x pruning
-            propagateEvents)
+            propagatePrunings)
       (False, True) ->
         readDomain x >>= retainRange r >>=
         flip unlessNothing (addPropagator x r m a entailed)
@@ -263,33 +263,31 @@ addPropagator :: Var s -> Range s ->
 addPropagator x r m a entailed = do
   propagator <- newPropagator m a
   forM_ m $ \ x' ->
-    whenPruned x' $ \ (Event pruning _) ->
+    whenPruned x' $ \ pruning ->
       when (Pruning.val `affectedBy` pruning) $
         modifyMonotoneVars propagator $ IntSet.delete x'
   forM_ a $ \ x' ->
-    whenPruned x' $ \ (Event pruning _) ->
+    whenPruned x' $ \ pruning ->
       when (Pruning.val `affectedBy` pruning) $
         modifyAntimonotoneVars propagator $ IntSet.delete x'
   IntMap.forWithKeyM_ (rangeVars r) $ \ x' dependentPruning ->
-    whenPruned x' $ \ (Event pruning time) ->
+    whenPruned x' $ \ pruning ->
       when (dependentPruning `affectedBy` pruning) $
         unlessMarked entailed $ do
           PropagatorS {..} <- readPropagator propagator
-          when (propagatorTime < time) $ do
-            stampPropagator propagator
-            case (IntSet.null monotoneVars, IntSet.null antimonotoneVars) of
-              (True, antimonotone) ->
-                readDomain x >>= retainRange r >>= maybe
-                (when antimonotone $ mark entailed)
-                (\ (dom', pruning') -> do
-                    when (Dom.null dom') empty
-                    writeDomain x dom'
-                    pruned x pruning')
-              (False, True) ->
-                readDomain x >>= retainRange r >>=
-                flip whenNothing (mark entailed)
-              (False, False) ->
-                return ()
+          case (IntSet.null monotoneVars, IntSet.null antimonotoneVars) of
+            (True, antimonotone) ->
+              readDomain x >>= retainRange r >>= maybe
+              (when antimonotone $ mark entailed)
+              (\ (dom', pruning') -> do
+                  when (Dom.null dom') empty
+                  writeDomain x dom'
+                  pruned x pruning')
+            (False, True) ->
+              readDomain x >>= retainRange r >>=
+              flip whenNothing (mark entailed)
+            (False, False) ->
+              return ()
 
 label :: Var s -> FDT s m Int
 label x = do
@@ -302,7 +300,7 @@ label x = do
     assignTo i = do
       writeDomain x $ Dom.singleton i
       pruned x Pruning.val
-      propagateEvents
+      propagatePrunings
       return i
 
 type ConditionalVars s = (IntSet (Var s), IntSet (Var s))
@@ -395,21 +393,19 @@ deleteRange (Complement r) dom' =
 
 pruned :: Var s -> Pruning -> FDT s m ()
 pruned x pruning = do
-  modify $ \ s@S { events, currentTime = time } ->
-    let f Nothing =
-          Just $ Event pruning currentTime
-        f (Just (Event pruning' _)) =
-          Just $ Event (pruning <> pruning') currentTime
-        currentTime = succ time in
-    s { events = IntMap.alter f x events, currentTime }
+  modify $ \ s@S {..} ->
+    s { prunings = IntMap.alter f x prunings }
+  where
+    f Nothing = Just pruning
+    f (Just pruning') = Just $ pruning <> pruning'
 
-propagateEvents :: FDT s m ()
-propagateEvents = do
+propagatePrunings :: FDT s m ()
+propagatePrunings = do
   s <- get
-  put s { events = mempty }
-  IntMap.forWithKeyM_ (events s) $ \ x event ->
-    readEventListeners x >>= mapM_ ($ event)
-  IntMap.null <$> gets events >>= flip unless propagateEvents
+  put s { prunings = mempty }
+  IntMap.forWithKeyM_ (prunings s) $ \ x pruning ->
+    readPruningListeners x >>= mapM_ ($ pruning)
+  IntMap.null <$> gets prunings >>= flip unless propagatePrunings
 
 getVal :: Term s -> FDT s m Int
 getVal t = case t of
@@ -428,14 +424,14 @@ getVal t = case t of
 
 data VarS s m =
   VarS { domain :: !Dom
-       , eventListeners :: !(Seq (EventListener s m))
+       , pruningListeners :: !(Seq (PruningListener s m))
        }
 
-type EventListener s m = Event -> FDT s m ()
+type PruningListener s m = Pruning -> FDT s m ()
 
 initVarS :: VarS s m
 initVarS = VarS { domain = Dom.full
-                , eventListeners = mempty
+                , pruningListeners = mempty
                 }
 
 readVar :: Var s -> FDT s m (VarS s m)
@@ -451,12 +447,12 @@ modifyVar x f = modify $ \ s@S {..} ->
 writeDomain :: Var s -> Dom -> FDT s m ()
 writeDomain x domain = modifyVar x $ \ s -> s { domain }
 
-readEventListeners :: Var s -> FDT s m (Seq (EventListener s m))
-readEventListeners = fmap eventListeners . readVar
+readPruningListeners :: Var s -> FDT s m (Seq (PruningListener s m))
+readPruningListeners = fmap pruningListeners . readVar
 
-whenPruned :: Var s -> EventListener s m -> FDT s m ()
-whenPruned x eventListener = modifyVar x $ \ s@VarS {..} ->
-  s { eventListeners = eventListeners |> eventListener }
+whenPruned :: Var s -> PruningListener s m -> FDT s m ()
+whenPruned x pruningListener = modifyVar x $ \ s@VarS {..} ->
+  s { pruningListeners = pruningListeners |> pruningListener }
 
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 newtype Propagator (s :: Region) =
@@ -474,7 +470,6 @@ instance IsInt (Propagator s) where
 data PropagatorS s =
   PropagatorS { monotoneVars :: !(MonotoneVars s)
               , antimonotoneVars :: !(AntimonotoneVars s)
-              , propagatorTime :: {-#UNPACK #-} !Time
               }
 
 type MonotoneVars s = IntSet (Var s)
@@ -489,7 +484,6 @@ newPropagator m a = do
   put s { propagatorCount = propagatorCount + 1
         , propagators = IntMap.insert x PropagatorS { monotoneVars = m
                                                     , antimonotoneVars = a
-                                                    , propagatorTime = startTime
                                                     } propagators
         }
   return x
@@ -501,7 +495,7 @@ modifyMonotoneVars :: Propagator s ->
                       (MonotoneVars s -> MonotoneVars s) ->
                       FDT s m ()
 modifyMonotoneVars x f = modifyPropagator x $ \ s@PropagatorS {..} ->
-   s { monotoneVars = f monotoneVars }
+  s { monotoneVars = f monotoneVars }
 
 modifyAntimonotoneVars :: Propagator s ->
                           (AntimonotoneVars s -> AntimonotoneVars s) ->
@@ -542,18 +536,6 @@ mark :: Flag s -> FDT s m ()
 mark flag = modify $ \ s@S {..} ->
   s { unmarkedFlags = IntSet.delete flag unmarkedFlags }
 
-data Event = Event !Pruning {-# UNPACK #-} !Time
-
-type Time = Int
-
-startTime :: Time
-startTime = minBound
-
-stampPropagator :: Propagator s -> FDT s m ()
-stampPropagator x = do
-  S {..} <- get
-  modifyPropagator x $ \ s -> s { propagatorTime = currentTime }
-
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_KindSignatures)
 data Region
 #endif
@@ -565,8 +547,7 @@ data S s m =
     , propagators :: !(IntMap (Propagator s) (PropagatorS s))
     , flagCount :: {-# UNPACK #-} !Int
     , unmarkedFlags :: !(IntSet (Flag s))
-    , events :: !(IntMap (Var s) Event)
-    , currentTime :: {-# UNPACK #-} !Time
+    , prunings :: !(IntMap (Var s) Pruning)
     }
 
 initS :: S s m
@@ -577,8 +558,7 @@ initS =
     , propagators = mempty
     , flagCount = 0
     , unmarkedFlags = mempty
-    , events = mempty
-    , currentTime = startTime
+    , prunings = mempty
     }
 
 whenNothing :: Monad m => Maybe a -> m () -> m ()
