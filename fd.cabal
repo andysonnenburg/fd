@@ -70,6 +70,17 @@ benchmark eq10
     fd
   ghc-options: -Wall -O2
 
+benchmark sendmory
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  hs-source-dirs: benchmarks
+  main-is: sendmory.hs
+  build-depends:
+    base,
+    criterion,
+    fd
+  ghc-options: -Wall -O2
+
 benchmark sudoku
   default-language: Haskell98
   type: exitcode-stdio-1.0

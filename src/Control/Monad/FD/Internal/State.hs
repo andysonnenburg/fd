@@ -12,6 +12,7 @@ module Control.Monad.FD.Internal.State
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.Logic.Class
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 newtype StateT s m a = StateT { runStateT :: s -> m (Pair a s) }
@@ -24,7 +25,7 @@ evalStateT m s = do
   return a
 
 state :: Monad m => (s -> Pair a s) -> StateT s m a
-state f = StateT $ return . f
+state f = StateT $ \ s -> return $! f s
 
 instance Functor m => Functor (StateT s m) where
   fmap f m = StateT $ \ s ->
@@ -54,6 +55,13 @@ instance MonadTrans (StateT s) where
     a <- m
     return $ a :*: s
 
+instance MonadLogic m => MonadLogic (StateT s m) where
+  msplit m = StateT $ \ s -> do
+    r <- msplit $ runStateT m s
+    case r of
+      Nothing -> return $ Nothing :*: s
+      Just (a :*: s', m') -> return $ Just (a, StateT (\ _ -> m')) :*: s'
+
 get :: Monad m => StateT s m s
 get = state $ \ s -> s :*: s
 
@@ -61,11 +69,7 @@ put :: Monad m => s -> StateT s m ()
 put s = s `seq` state $ \ _ -> () :*: s
 
 modify :: Monad m => (s -> s) -> StateT s m ()
-modify f = do
-  s <- get
-  put $! f s
+modify f = state $ \ s -> () :*: f s
 
 gets :: Monad m => (s -> a) -> StateT s m a
-gets f = do
-  s <- get
-  return $ f s
+gets f = state $ \ s -> f s :*: s

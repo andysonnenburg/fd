@@ -42,7 +42,7 @@ import Control.Monad (MonadPlus (mplus, mzero),
                       unless,
                       when)
 import Control.Monad.IO.Class (MonadIO (liftIO))
-import Control.Monad.Logic (LogicT, observeAllT)
+import Control.Monad.Logic (LogicT, MonadLogic (msplit), observeAllT)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (forM_, mapM_)
@@ -111,6 +111,9 @@ instance MonadTrans (FDT s) where
 
 instance MonadIO m => MonadIO (FDT s m) where
   liftIO = lift . liftIO
+
+instance Monad m => MonadLogic (FDT s m) where
+  msplit = FDT . fmap (fmap (fmap FDT)) . msplit . unFDT
 
 infixl 6 +, -
 infixl 7 *, `quot`, `div`
