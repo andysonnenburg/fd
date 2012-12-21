@@ -64,10 +64,15 @@ benchmark eq10
   type: exitcode-stdio-1.0
   hs-source-dirs: benchmarks
   main-is: eq10.hs
-  build-depends:
-    base,
-    criterion,
-    fd
+  build-depends: base, criterion, fd
+  ghc-options: -Wall -O2
+
+benchmark eq20
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  hs-source-dirs: benchmarks
+  main-is: eq20.hs
+  build-depends: base, criterion, fd
   ghc-options: -Wall -O2
 
 benchmark sendmory
@@ -75,10 +80,7 @@ benchmark sendmory
   type: exitcode-stdio-1.0
   hs-source-dirs: benchmarks
   main-is: sendmory.hs
-  build-depends:
-    base,
-    criterion,
-    fd
+  build-depends: base, criterion, fd
   ghc-options: -Wall -O2
 
 benchmark sudoku
@@ -86,8 +88,5 @@ benchmark sudoku
   type: exitcode-stdio-1.0
   hs-source-dirs: benchmarks
   main-is: sudoku.hs
-  build-depends:
-    base,
-    criterion,
-    fd
+  build-depends: base, criterion, fd
   ghc-options: -Wall -O2

@@ -37,15 +37,15 @@ chunk n xs = ys : chunk n zs
 problem :: FDT s m [Term s]
 problem =
   sequence
-  [ int 8, var,   var,   var,   var,   int 5, var,   var,   var,
-    var,   int 1, int 2, int 3, var,   var,   int 6, var,   var,
-    var,   int 4, int 5, int 6, var,   var,   var,   int 2, var,
-    var,   int 7, int 8, var,   var,   var,   var,   var,   int 1,
-    var,   var,   var,   var,   int 9, var,   var,   var,   var,
-    int 9, var,   var,   var,   var,   var,   int 8, int 7, var,
-    var,   int 2, var,   var,   var,   int 6, int 5, int 4, var,
-    var,   var,   int 4, var,   var,   int 3, int 2, int 1, var,
-    var,   var,   var,   int 1, var,   var,   var,   var,   int 9 ]
+  [ int 8, var, var, var, var, int 5, var, var, var,
+    var, int 1, int 2, int 3, var, var, int 6, var, var,
+    var, int 4, int 5, int 6, var, var, var, int 2, var,
+    var, int 7, int 8, var, var, var, var, var, int 1,
+    var, var, var, var, int 9, var, var, var, var,
+    int 9, var, var, var, var, var, int 8, int 7, var,
+    var, int 2, var, var, var, int 6, int 5, int 4, var,
+    var, var, int 4, var, var, int 3, int 2, int 1, var,
+    var, var, var, int 1, var, var, var, var, int 9 ]
   where
     int = return
     var = freshTerm

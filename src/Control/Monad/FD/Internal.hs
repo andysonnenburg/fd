@@ -10,6 +10,7 @@
   , MultiParamTypeClasses
   , NamedFieldPuns
   , Rank2Types
+  , RebindableSyntax
   , RecordWildCards #-}
 module Control.Monad.FD.Internal
        ( FD
@@ -123,7 +124,7 @@ class Additive a where
   (-) :: a -> a -> a
   a - b = a + negate b
   negate :: a -> a
-  negate = (fromInteger 0 -)
+  negate = (0 -)
   fromInteger :: Integer -> a
 
 subtract :: Additive a => a -> a -> a
@@ -395,9 +396,8 @@ deleteRange (Complement r) dom' =
   retainRange r dom'
 
 pruned :: Var s -> Pruning -> FDT s m ()
-pruned x pruning = do
-  modify $ \ s@S {..} ->
-    s { prunings = IntMap.alter f x prunings }
+pruned x pruning = modify $ \ s@S {..} ->
+  s { prunings = IntMap.alter f x prunings }
   where
     f Nothing = Just pruning
     f (Just pruning') = Just $ pruning <> pruning'
@@ -581,3 +581,7 @@ modify = FDT . State.modify
 
 gets :: (S s m -> a) -> FDT s m a
 gets = FDT . State.gets
+
+ifThenElse :: Bool -> a -> a -> a
+ifThenElse True t _ = t
+ifThenElse False _ e = e
