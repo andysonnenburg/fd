@@ -130,37 +130,34 @@ deleteGT' x dom = case dom of
       | otherwise -> fromIntSet lt
 
 delete :: Dom -> Dom -> Maybe (Dom, Pruning)
-delete (Bounds min1 max1) dom@(Bounds min2 max2) =
-  prunedFromTo dom dom'
-  where
-    dom'
-      | min1 > min2 && max1 < max2 =
-        fromIntSet $
-        IntSet.fromList [min2 .. min1 - 1] <>
-        IntSet.fromList [max1 + 1 .. max2]
-      | max1 < min2 && max1 < max2 =
-        dom
-      | max1 < max2 =
-        fromBounds (max1 + 1) max2
-      | min1 > min2 && min1 > max2 =
-        dom
-      | min1 > min2 =
-        fromBounds min2 (min1 - 1)
-      | otherwise = empty
+delete (Bounds min1 max1) dom@(Bounds min2 max2)
+  | min1 > min2 && max1 < max2 =
+    prunedFromTo dom $ fromIntSet $
+    IntSet.fromList [min2 .. min1 - 1] <>
+    IntSet.fromList [max1 + 1 .. max2]
+  | max1 < min2 || min1 > max2 =
+    Nothing
+  | max1 < max2 =
+    prunedFromTo dom $ fromBounds (max1 + 1) max2
+  | min1 > min2 =
+    prunedFromTo dom $ fromBounds min2 (min1 - 1)
+  | otherwise =
+    prunedFromTo dom $ empty
 delete (Bounds min max) dom@(IntSet set) =
-  prunedFromTo dom dom'
+  prunedFromTo dom $ case IntSet.split min set of
+    (lt, gt) -> case IntSet.split max gt of
+      (_, gt') -> fromIntSet $ lt <> gt'
+delete (IntSet set1) dom@(Bounds min2 max2)
+  | min1 > max2 || max1 < min2 =
+    Nothing
+  | otherwise =
+    prunedFromTo dom $ fromIntSet $ set2 \\ set1
   where
-    dom' = case IntSet.split min set of
-      (lt, gt) -> case IntSet.split max gt of
-        (_, gt') -> fromIntSet $ lt <> gt'
-delete (IntSet set) dom@(Bounds min max) =
-  prunedFromTo dom dom'
-  where
-    dom' = fromIntSet $ IntSet.fromList [min .. max] \\ set
+    set2 = IntSet.fromList [min2 .. max2]
+    min1 = IntSet.findMin set1
+    max1 = IntSet.findMax set1
 delete (IntSet set1) dom@(IntSet set2) =
-  prunedFromTo dom dom'
-  where
-    dom' = fromIntSet $ set2 \\ set1
+  prunedFromTo dom $ fromIntSet $ set2 \\ set1
 delete Empty _ =
   Nothing
 delete _ Empty =
@@ -171,8 +168,13 @@ retain Empty dom =
   prunedFromTo dom empty
 retain (Bounds min max) dom =
   prunedFromTo dom (deleteGT' max . deleteLT' min $ dom)
-retain (IntSet set1) dom@(Bounds min2 max2) =
-  prunedFromTo dom (fromIntSet $ IntSet.intersection set1 set2)
+retain dom'@(IntSet set1) dom@(Bounds min2 max2)
+  | min1 >= min2 && max1 <= max2 =
+    prunedFromTo dom dom'
+  | min1 > max2 || max1 < min2 =
+    prunedFromTo dom empty
+  | otherwise =
+    prunedFromTo dom (fromIntSet $ IntSet.intersection set1 set2)
   where
     set2 = IntSet.fromList [Prelude.max min1 min2 .. Prelude.min max1 max2]
     min1 = IntSet.findMin set1
