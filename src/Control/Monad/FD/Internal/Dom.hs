@@ -174,9 +174,9 @@ retain (Bounds min max) dom =
 retain (IntSet set1) dom@(Bounds min2 max2) =
   prunedFromTo dom (fromIntSet $ IntSet.intersection set1 set2)
   where
-    min1 = IntSet.findMin set1
-    max1 = IntSet.findMax set2
     set2 = IntSet.fromList [Prelude.max min1 min2 .. Prelude.min max1 max2]
+    min1 = IntSet.findMin set1
+    max1 = IntSet.findMax set1
 retain (IntSet set1) dom@(IntSet set2) =
   prunedFromTo dom (fromIntSet $ IntSet.intersection set1 set2)
 retain (IntSet _) Empty =
