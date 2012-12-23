@@ -129,37 +129,41 @@ deleteGT' x dom = case dom of
       | mem -> fromIntSet $ IntSet.insert x lt
       | otherwise -> fromIntSet lt
 
-deleteBetween' :: Min -> Max -> Dom -> Dom
-deleteBetween' _ _ Empty =
-  empty
-deleteBetween' min1 max1 dom@(Bounds min2 max2) =
-  case (compare min1 min2,
-        compare min1 max2,
-        compare max1 min2,
-        compare max1 max2) of
-    (GT, _, _, LT) -> fromIntSet $
-                      IntSet.fromList [min2 .. min1 - 1] <>
-                      IntSet.fromList [max1 + 1 .. max2]
-    (_, _, LT, LT) -> dom
-    (_, _, _, LT) -> fromBounds (max1 + 1) max2
-    (GT, GT, _, _) -> dom
-    (GT, _, _, _) -> fromBounds min2 (min1 - 1)
-    _ -> empty
-deleteBetween' min max (IntSet set) =
-  case IntSet.split min set of
-    (lt, gt) -> case IntSet.split max gt of
-      (_, gt') -> fromIntSet $ lt <> gt'
-
 delete :: Dom -> Dom -> Maybe (Dom, Pruning)
+delete (Bounds min1 max1) dom@(Bounds min2 max2) =
+  prunedFromTo dom dom'
+  where
+    dom'
+      | min1 > min2 && max1 < max2 =
+        fromIntSet $
+        IntSet.fromList [min2 .. min1 - 1] <>
+        IntSet.fromList [max1 + 1 .. max2]
+      | max1 < min2 && max1 < max2 =
+        dom
+      | max1 < max2 =
+        fromBounds (max1 + 1) max2
+      | min1 > min2 && min1 > max2 =
+        dom
+      | min1 > min2 =
+        fromBounds min2 (min1 - 1)
+      | otherwise = empty
+delete (Bounds min max) dom@(IntSet set) =
+  prunedFromTo dom dom'
+  where
+    dom' = case IntSet.split min set of
+      (lt, gt) -> case IntSet.split max gt of
+        (_, gt') -> fromIntSet $ lt <> gt'
+delete (IntSet set) dom@(Bounds min max) =
+  prunedFromTo dom dom'
+  where
+    dom' = fromIntSet $ IntSet.fromList [min .. max] \\ set
+delete (IntSet set1) dom@(IntSet set2) =
+  prunedFromTo dom dom'
+  where
+    dom' = fromIntSet $ set2 \\ set1
 delete Empty _ =
   Nothing
-delete (Bounds min max) dom =
-  prunedFromTo dom (deleteBetween' min max dom)
-delete (IntSet set) dom@(Bounds min max) =
-  prunedFromTo dom (fromIntSet $ IntSet.fromList [min .. max] \\ set)
-delete (IntSet set1) dom@(IntSet set2) =
-  prunedFromTo dom (fromIntSet $ set2 \\ set1)
-delete (IntSet _) Empty =
+delete _ Empty =
   Nothing
 
 retain :: Dom -> Dom -> Maybe (Dom, Pruning)
