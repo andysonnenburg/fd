@@ -242,23 +242,24 @@ in' = In
 tell :: [Indexical s] -> FDT s m ()
 tell indexicals = do
   entailed <- newFlag
-  forM_ indexicals $ \ (x `In` r) -> do
-    (m, a) <- getMonotonicityRangeVars r
-    case (IntSet.null m, IntSet.null a) of
-      (True, antimonotone) ->
-        readDomain x >>= retainRange r >>= maybe
-        (unless antimonotone $ addPropagator x r m a entailed)
-        (\ (dom', pruning) -> do
-            when (Dom.null dom') empty
-            addPropagator x r m a entailed
-            writeDomain x dom'
-            pruned x pruning
-            propagatePrunings)
-      (False, True) ->
-        readDomain x >>= retainRange r >>=
-        flip unlessNothing (addPropagator x r m a entailed)
-      (False, False) ->
-        addPropagator x r m a entailed
+  forM_ indexicals $ \ (x `In` r) ->
+    unlessMarked entailed $ do
+      (m, a) <- getMonotonicityRangeVars r
+      case (IntSet.null m, IntSet.null a) of
+        (True, antimonotone) ->
+          readDomain x >>= retainRange r >>= maybe
+          (bool (mark entailed) (addPropagator x r m a entailed) antimonotone)
+          (\ (dom', pruning) -> do
+              when (Dom.null dom') empty
+              addPropagator x r m a entailed
+              writeDomain x dom'
+              pruned x pruning
+              propagatePrunings)
+        (False, True) ->
+          readDomain x >>= retainRange r >>=
+          maybe (mark entailed) (const $ addPropagator x r m a entailed)
+        (False, False) ->
+          addPropagator x r m a entailed
 
 addPropagator :: Var s -> Range s ->
                  MonotoneVars s -> AntimonotoneVars s ->
@@ -567,9 +568,6 @@ initS =
 whenNothing :: Monad m => Maybe a -> m () -> m ()
 whenNothing p m = maybe m (const $ return ()) p
 
-unlessNothing :: Monad m => Maybe a -> m () -> m ()
-unlessNothing p m = maybe (return ()) (const m) p
-
 get :: FDT s m (S s m)
 get = FDT State.get
 
@@ -581,6 +579,10 @@ modify = FDT . State.modify
 
 gets :: (S s m -> a) -> FDT s m a
 gets = FDT . State.gets
+
+bool :: a -> a -> Bool -> a
+bool t _ True = t
+bool _ e False = e
 
 ifThenElse :: Bool -> a -> a -> a
 ifThenElse True t _ = t
