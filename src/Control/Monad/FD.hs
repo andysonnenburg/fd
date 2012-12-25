@@ -60,14 +60,21 @@ instance Bounded (Term s) where
   maxBound = fromInt maxBound
 
 instance Additive (Term s) where
-  Term x1 y1 + Term x2 y2 =
-    Term (IntMap.unionWith (+!) x1 x2) (y1 +! y2)
-  Term x1 y1 - Term x2 y2 =
-    Term (IntMap.unionWith (+!) x1 (negate <$> x2)) (y1 -! y2)
+  Term xs1 c1 + Term xs2 c2 =
+    Term (IntMap.unionWith (+!) xs1 xs2) (c1 +! c2)
+  Term xs1 c1 - Term xs2 c2 =
+    Term (xs1 `minusIntMap` xs2) (c1 -! c2)
   negate (Term x y) =
     Term (negate <$> x) (negate y)
   fromInteger =
     Term mempty . fromInteger
+
+minusIntMap :: IntMap k Int -> IntMap k Int -> IntMap k Int
+minusIntMap = IntMap.mergeWithKey f id (fmap negate)
+  where
+    f _ x1 x2 = case x1 -! x2 of
+      0 -> Nothing
+      x -> Just x
 
 instance Multiplicative Int (Term s) (Term s) where
   a * Term x c = Term ((a *!) <$> x) (a *! c)
@@ -78,7 +85,7 @@ instance Multiplicative (Term s) Int (Term s) where
 infix 4 #=, #/=, #<, #<=, #>, #>=
 (#=), (#/=), (#<), (#<=), (#>), (#>=) :: Term s -> Term s -> FDT s m ()
 
-Term x1 c1 #= Term x2 c2
+Term xs1 c1 #= Term xs2 c2
   | IntMap.null xs =
     guard $ c == 0
   | otherwise =
@@ -88,10 +95,10 @@ Term x1 c1 #= Term x2 c2
     , let (min, max) = bounds (IntMap.delete x xs) c a
     ]
   where
-    xs = IntMap.filter (/= 0) $ IntMap.unionWith (+!) x1 (negate <$> x2)
+    xs = xs1 `minusIntMap` xs2
     c = c1 -! c2
 
-Term x1 c1 #/= Term x2 c2
+Term xs1 c1 #/= Term xs2 c2
   | IntMap.null xs =
     guard $ c /= 0
   | otherwise =
@@ -101,10 +108,10 @@ Term x1 c1 #/= Term x2 c2
     , let (min, max) = bounds (IntMap.delete x xs) c a
     ]
   where
-    xs = IntMap.filter (/= 0) $ IntMap.unionWith (+!) x1 (negate <$> x2)
+    xs = xs1 `minusIntMap` xs2
     c = c1 -! c2
 
-Term x1 c1 #< Term x2 c2
+Term xs1 c1 #< Term xs2 c2
   | IntMap.null xs =
     guard $ c < 0
   | otherwise =
@@ -116,10 +123,10 @@ Term x1 c1 #< Term x2 c2
                      | otherwise = (minBound, snd r)
     ]
   where
-    xs = IntMap.filter (/= 0) $ IntMap.unionWith (+!) x1 (negate <$> x2)
+    xs = xs1 `minusIntMap` xs2
     c = c1 -! c2
 
-Term x1 c1 #<= Term x2 c2
+Term xs1 c1 #<= Term xs2 c2
   | IntMap.null xs =
     guard $ c <= 0
   | otherwise =
@@ -131,7 +138,7 @@ Term x1 c1 #<= Term x2 c2
                      | otherwise = (fst r, maxBound)
     ]
   where
-    xs = IntMap.filter (/= 0) $ IntMap.unionWith (+!) x1 (negate <$> x2)
+    xs = xs1 `minusIntMap` xs2
     c = c1 -! c2
 
 (#>) = flip (#<)

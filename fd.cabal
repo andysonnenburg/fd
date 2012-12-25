@@ -36,7 +36,7 @@ library
     base >= 4 && < 5,
     transformers >= 0.2 && < 0.4,
     logict,
-    containers >= 0.5.0.0,
+    containers,
     semigroups
   other-extensions:
     CPP

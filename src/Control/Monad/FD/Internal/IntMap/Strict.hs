@@ -11,6 +11,7 @@ module Control.Monad.FD.Internal.IntMap.Strict
        , forWithKeyM_
        , insert
        , member
+       , mergeWithKey
        , null
        , singleton
        , sunion
@@ -79,6 +80,23 @@ insert k v m = IntMap $ IntMap.insert (toInt k) (k :*: v) (unIntMap m)
 
 member :: IsInt k => k -> IntMap k v -> Bool
 member k = IntMap.member (toInt k) . unIntMap
+
+mergeWithKey :: (k -> a -> b -> Maybe c) ->
+                (IntMap k a -> IntMap k c) ->
+                (IntMap k b -> IntMap k c) ->
+                IntMap k a -> IntMap k b -> IntMap k c
+mergeWithKey f g1 g2 = \ m1 m2 ->
+  IntMap $ IntMap.mergeWithKey f' g1' g2' (unIntMap m1) (unIntMap m2)
+  where
+    f' _ (k :*: a) (_ :*: b) = case f k a b of
+      Nothing -> Nothing
+      Just c -> Just $ k :*: c
+    {-# INLINE f' #-}
+    g1' = unIntMap . g1 . IntMap
+    {-# INLINE g1' #-}
+    g2' = unIntMap . g2 . IntMap
+    {-# INLINE g2' #-}
+{-# INLINE mergeWithKey #-}
 
 null :: IntMap k v -> Bool
 null = IntMap.null . unIntMap
