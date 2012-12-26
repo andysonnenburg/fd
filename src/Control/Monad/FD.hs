@@ -1,6 +1,7 @@
 {-# LANGUAGE
     MultiParamTypeClasses
-  , RebindableSyntax #-}
+  , RebindableSyntax
+  , RecordWildCards #-}
 module Control.Monad.FD
        ( FD
        , runFD
@@ -23,16 +24,16 @@ module Control.Monad.FD
        ) where
 
 import Control.Applicative
-import Control.Arrow
+import Control.Category (Category, id)
+import Control.Arrow ((<<<))
 import Control.Monad (guard)
 
 import Data.Monoid (mempty)
-import Data.Tuple (swap)
 
 import Prelude hiding (Fractional (..),
                        Num (..),
                        Integral (..),
-                       fromIntegral, max, min, subtract)
+                       fromIntegral, id, max, min, subtract)
 import qualified Prelude
 
 import Control.Monad.FD.Internal hiding (Term, fromInt, label, max, min)
@@ -90,9 +91,9 @@ Term xs1 c1 #= Term xs2 c2
     guard $ c == 0
   | otherwise =
     tell
-    [ x `in'` min #.. max
+    [ x `in'` minTerm #.. maxTerm
     | (x, a) <- IntMap.toList xs
-    , let (min, max) = bounds (IntMap.delete x xs) c a
+    , let Bounds {..} = bounds (IntMap.delete x xs) c a
     ]
   where
     xs = xs1 `minusIntMap` xs2
@@ -103,9 +104,9 @@ Term xs1 c1 #/= Term xs2 c2
     guard $ c /= 0
   | otherwise =
     tell
-    [ x `in'` complement (min #.. max)
+    [ x `in'` complement (minTerm #.. maxTerm)
     | (x, a) <- IntMap.toList xs
-    , let (min, max) = bounds (IntMap.delete x xs) c a
+    , let Bounds {..} = bounds (IntMap.delete x xs) c a
     ]
   where
     xs = xs1 `minusIntMap` xs2
@@ -118,9 +119,9 @@ Term xs1 c1 #< Term xs2 c2
     tell
     [ x `in'` complement (min #.. max)
     | (x, a) <- IntMap.toList xs
-    , let r = bounds (IntMap.delete x xs) c a
-          (min, max) | a >= 0 = (fst r, maxBound)
-                     | otherwise = (minBound, snd r)
+    , let Bounds {..} = bounds (IntMap.delete x xs) c a
+          (min, max) | a >= 0 = (minTerm, maxBound)
+                     | otherwise = (minBound, maxTerm)
     ]
   where
     xs = xs1 `minusIntMap` xs2
@@ -133,9 +134,9 @@ Term xs1 c1 #<= Term xs2 c2
     tell
     [ x `in'` min #.. max
     | (x, a) <- IntMap.toList xs
-    , let r = bounds (IntMap.delete x xs) c a
-          (min, max) | a >= 0 = (minBound, snd r)
-                     | otherwise = (fst r, maxBound)
+    , let Bounds {..} = bounds (IntMap.delete x xs) c a
+          (min, max) | a >= 0 = (minBound, maxTerm)
+                     | otherwise = (minTerm, maxBound)
     ]
   where
     xs = xs1 `minusIntMap` xs2
@@ -152,7 +153,10 @@ distinct (x:xs) = do
   mapM_ (x #/=) xs
   distinct xs
 
-type Bounds s = (Internal.Term s, Internal.Term s)
+data Bounds s =
+  Bounds { minTerm :: Internal.Term s
+         , maxTerm :: Internal.Term s
+         }
 
 bounds :: IntMap (Var s) Factor -> Addend -> Divisor -> Bounds s
 bounds xs c a =
@@ -160,13 +164,12 @@ bounds xs c a =
   whenA (a < 0) swap $
   IntMap.foldrWithKey f (pair $ fromIntegral $ negate c) xs
   where
-    f x v
-      | v >= 0 =
-        (+ (-v) * Internal.max x) *** (+ (-v) * Internal.min x)
-      | v /= (-1) =
-        (+ (-v) * Internal.min x) *** (+ (-v) * Internal.max x)
-      | otherwise =
-        (+ Internal.min x) *** (+ Internal.max x)
+    f x v | v >= 0 =
+      (+ (-v) * Internal.max x) *** (+ (-v) * Internal.min x)
+    f x (-1) =
+      (+ Internal.min x) *** (+ Internal.max x)
+    f x v =
+      (+ (-v) * Internal.min x) *** (+ (-v) * Internal.max x)
 
 label :: Term s -> FDT s m Int
 label (Term x y) =
@@ -177,9 +180,17 @@ label (Term x y) =
 fromIntegral :: (Prelude.Integral a, Additive b) => a -> b
 fromIntegral = fromInteger . Prelude.toInteger
 
-whenA :: Arrow a => Bool -> a b b -> a b b
-whenA True a = a
-whenA False _ = arr id
+(***) :: (Internal.Term s -> Internal.Term s) ->
+        (Internal.Term s -> Internal.Term s) ->
+        Bounds s -> Bounds s
+(f *** g) ~Bounds {..} = Bounds (f minTerm) (g maxTerm)
 
-pair :: a -> (a, a)
-pair a = (a, a)
+whenA :: Category cat => Bool -> cat a a -> cat a a
+whenA True f = f
+whenA False _ = id
+
+swap :: Bounds s -> Bounds s
+swap Bounds {..} = Bounds maxTerm minTerm
+
+pair :: Internal.Term s -> Bounds s
+pair a = Bounds a a
