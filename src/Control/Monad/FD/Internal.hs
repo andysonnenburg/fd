@@ -221,7 +221,7 @@ infix 5 :..
 data Range s
   = !(Term s) :.. !(Term s)
   | Dom !(Var s)
-  | Complement (Range s)
+  | Complement !(Range s)
 
 (#..) :: Term s -> Term s -> Range s
 (#..) = (:..)
