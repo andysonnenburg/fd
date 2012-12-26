@@ -111,7 +111,7 @@ instance MonadTrans (FDT s) where
   lift = FDT . lift . lift
 
 instance MonadIO m => MonadIO (FDT s m) where
-  liftIO = lift . liftIO
+  liftIO = FDT . liftIO
 
 instance Monad m => MonadLogic (FDT s m) where
   msplit = FDT . fmap (fmap (fmap FDT)) . msplit . unFDT

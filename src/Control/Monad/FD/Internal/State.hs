@@ -12,6 +12,7 @@ module Control.Monad.FD.Internal.State
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Logic.Class
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
@@ -54,6 +55,9 @@ instance MonadTrans (StateT s) where
   lift m = StateT $ \ s -> do
     a <- m
     return $ a :*: s
+
+instance MonadIO m => MonadIO (StateT s m) where
+  liftIO = lift . liftIO
 
 instance MonadLogic m => MonadLogic (StateT s m) where
   msplit m = StateT $ \ s -> do
