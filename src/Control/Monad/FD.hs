@@ -21,6 +21,7 @@ module Control.Monad.FD
        , (#>=)
        , distinct
        , label
+       , label'
        ) where
 
 import Control.Applicative
@@ -28,12 +29,14 @@ import Control.Category (Category, id)
 import Control.Arrow ((<<<))
 import Control.Monad (guard)
 
+import Data.Foldable (foldMap)
+import Data.Traversable (Traversable, mapM)
 import Data.Monoid (mempty)
 
 import Prelude hiding (Fractional (..),
                        Num (..),
                        Integral (..),
-                       fromIntegral, id, max, min, subtract)
+                       fromIntegral, id, mapM, max, min, subtract)
 import qualified Prelude
 
 import Control.Monad.FD.Internal hiding (Term, fromInt, label, max, min)
@@ -176,6 +179,11 @@ label (Term x y) =
   IntMap.foldlWithKey' f (return $ fromIntegral y) x
   where
     f a k v = (+) <$> a <*> ((v *) <$> Internal.label k)
+
+label' :: Traversable t => t (Term s) -> FDT s m (t Int)
+label' xs = do
+  label_' $ foldMap (\ (Term xs' _) -> IntMap.keys xs') xs
+  mapM label xs
 
 fromIntegral :: (Prelude.Integral a, Additive b) => a -> b
 fromIntegral = fromInteger . Prelude.toInteger

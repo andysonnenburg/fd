@@ -8,6 +8,7 @@ module Control.Monad.FD.Internal.Dom
        , findMax
        , null
        , isVal
+       , size
        , delete
        , retain
        , toList
@@ -71,6 +72,12 @@ isVal dom = case toList dom of
   [_] -> True
   _ -> False
 
+size :: Dom -> Int
+size dom = case dom of
+  Empty -> 0
+  Bounds min max -> max - min + 1
+  IntSet set -> IntSet.size set
+
 prunedFromTo :: Dom -> Dom -> Maybe (Dom, Pruning)
 prunedFromTo dom1 dom2 =
   fmap ((,) dom2) . getOption . foldMap (Option . Just . snd) $ filter fst
@@ -100,12 +107,6 @@ prunedToVal dom1 dom2 = case (toList dom1, toList dom2) of
   ([_], [_]) -> False
   (_, [_]) -> True
   _ -> False
-
-size :: Dom -> Int
-size dom = case dom of
-  Empty -> 0
-  Bounds min max -> max - min + 1
-  IntSet set -> IntSet.size set
 
 deleteLT' :: Int -> Dom -> Dom
 deleteLT' x dom = case dom of
@@ -142,7 +143,7 @@ delete (Bounds min1 max1) dom@(Bounds min2 max2)
   | min1 > min2 =
     prunedFromTo dom $ fromBounds min2 (min1 - 1)
   | otherwise =
-    prunedFromTo dom $ empty
+    prunedFromTo dom empty
 delete (Bounds min max) dom@(IntSet set) =
   prunedFromTo dom $ case IntSet.split min set of
     (lt, gt) -> case IntSet.split max gt of

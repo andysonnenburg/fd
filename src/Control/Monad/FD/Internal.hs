@@ -35,10 +35,13 @@ module Control.Monad.FD.Internal
        , in'
        , tell
        , label
+       , label_
+       , label_'
        ) where
 
 import Control.Applicative
 import Control.Monad (MonadPlus (mplus, mzero),
+                      (>=>),
                       msum,
                       unless,
                       when)
@@ -47,15 +50,18 @@ import Control.Monad.Logic (LogicT, MonadLogic (msplit), observeAllT)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
 import Data.Foldable (forM_, mapM_)
+import Data.List (sort)
 import Data.Function (on)
 import Data.Functor.Identity
 import Data.Monoid (mempty)
 import Data.Semigroup ((<>))
 import Data.Sequence (Seq, (|>))
+import qualified Data.Sequence as Sequence
 import Data.Tuple (swap)
 
 import Prelude hiding (Integral (..),
                        Num (..),
+                       fst,
                        mapM_,
                        max,
                        min,
@@ -307,6 +313,52 @@ label x = do
       pruned x Pruning.val
       propagatePrunings
       return i
+
+label_ :: Var s -> FDT s m ()
+label_ x = do
+  dom' <- readDomain x
+  case Dom.toList dom' of
+    [] -> empty
+    [_] -> return ()
+    (i:j:is) -> assignTo i <|> assignTo j <|> msum (map assignTo is)
+  where
+    assignTo i = do
+      writeDomain x $ Dom.singleton i
+      pruned x Pruning.val
+      propagatePrunings
+
+label_' :: [Var s] -> FDT s m ()
+label_' =
+  mapM (\ x -> do
+    VarS {..} <- readVar x
+    return $ x :*: (Dom.size domain, Down $ Sequence.length pruningListeners))
+  >=>
+  mapM_ (label_ . fst) . sort
+
+data OnSnd a b = a :*: b
+
+fst :: OnSnd a b -> a
+fst (a :*: _) = a
+
+instance Eq b => Eq (OnSnd a b) where
+  (_ :*: b) == (_ :*: b') = b == b'
+  (_ :*: b) /= (_ :*: b') = b /= b'
+
+instance Ord b => Ord (OnSnd a b) where
+  compare (_ :*: b) (_ :*: b') = b `compare` b'
+  (_ :*: b) < (_ :*: b') = b < b'
+  (_ :*: b) >= (_ :*: b') = b >= b'
+  (_ :*: b) > (_ :*: b') = b > b'
+  (_ :*: b) <= (_ :*: b') = b <= b'
+
+newtype Down a = Down a deriving Eq
+
+instance Ord a => Ord (Down a) where
+  compare (Down x) (Down y) = y `compare` x
+  Down x < Down y = y < x
+  Down x >= Down y = y >= x
+  Down x > Down y = y > x
+  Down x <= Down y = y <= x
 
 type MonotonicityVars s = (MonotoneVars s, AntimonotoneVars s)
 

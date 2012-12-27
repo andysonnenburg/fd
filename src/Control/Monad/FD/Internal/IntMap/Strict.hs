@@ -10,6 +10,7 @@ module Control.Monad.FD.Internal.IntMap.Strict
        , foldrWithKey
        , forWithKeyM_
        , insert
+       , keys
        , member
        , mergeWithKey
        , null
@@ -78,6 +79,9 @@ forWithKeyM_ xs f = foldrWithKey (\ k v a -> f k v >> a) (return ()) xs
 insert :: IsInt k => k -> v -> IntMap k v -> IntMap k v
 insert k v m = IntMap $ IntMap.insert (toInt k) (k :*: v) (unIntMap m)
 
+keys :: IntMap k v -> [k]
+keys = fmap (\ (k :*: _) -> k) . IntMap.elems . unIntMap
+
 member :: IsInt k => k -> IntMap k v -> Bool
 member k = IntMap.member (toInt k) . unIntMap
 
@@ -102,7 +106,7 @@ null :: IntMap k v -> Bool
 null = IntMap.null . unIntMap
 
 singleton :: IsInt k => k -> v -> IntMap k v
-singleton k = IntMap . IntMap.singleton (toInt k) . (k :*:)
+singleton k v = IntMap $ IntMap.singleton (toInt k) $ k :*: v
 
 sunion :: (IsInt k, Semigroup v) => IntMap k v -> IntMap k v -> IntMap k v
 sunion xs ys = IntMap $ IntMap.unionWith (<>) (unIntMap xs) (unIntMap ys)
