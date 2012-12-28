@@ -21,6 +21,7 @@ module Control.Monad.FD.Internal
        , subtract
        , Multiplicative (..)
        , Integral (..)
+       , Fractional (..)
        , Var
        , freshVar
        , Term
@@ -59,7 +60,8 @@ import Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Sequence
 import Data.Tuple (swap)
 
-import Prelude hiding (Integral (..),
+import Prelude hiding (Fractional (..),
+                       Integral (..),
                        Num (..),
                        fst,
                        mapM_,
@@ -123,7 +125,7 @@ instance Monad m => MonadLogic (FDT s m) where
   msplit = FDT . fmap (fmap (fmap FDT)) . msplit . unFDT
 
 infixl 6 +, -
-infixl 7 *, `quot`, `div`
+infixl 7 *, `quot`, `div`, /
 
 class Additive a where
   (+) :: a -> a -> a
@@ -145,6 +147,11 @@ class ( Multiplicative a b a
   quot :: a -> b -> a
   div :: a -> b -> a
   div' :: a -> b -> a
+
+class ( Multiplicative a b a
+      , Multiplicative b a a
+      ) => Fractional a b where
+  (/) :: a -> b -> a
 
 instance Additive Int where
   (+) = (Prelude.+)

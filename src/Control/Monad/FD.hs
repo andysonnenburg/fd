@@ -1,7 +1,10 @@
 {-# LANGUAGE
-    MultiParamTypeClasses
+    FlexibleInstances
+  , FunctionalDependencies
+  , MultiParamTypeClasses
   , RebindableSyntax
-  , RecordWildCards #-}
+  , RecordWildCards
+  , UndecidableInstances #-}
 module Control.Monad.FD
        ( FD
        , runFD
@@ -13,6 +16,7 @@ module Control.Monad.FD
        , fromInt
        , Additive (..)
        , Multiplicative (..)
+       , Fractional (..)
        , (#=)
        , (#/=)
        , (#<)
@@ -26,7 +30,6 @@ module Control.Monad.FD
 
 import Control.Applicative
 import Control.Category (Category, id)
-import Control.Arrow ((<<<))
 import Control.Monad (guard)
 
 import Data.Foldable (foldMap)
@@ -34,9 +37,14 @@ import Data.Traversable (Traversable, mapM)
 import Data.Monoid (mempty)
 
 import Prelude hiding (Fractional (..),
-                       Num (..),
                        Integral (..),
-                       fromIntegral, id, mapM, max, min, subtract)
+                       Num (..),
+                       fromIntegral,
+                       id,
+                       mapM,
+                       max,
+                       min,
+                       subtract)
 import qualified Prelude
 
 import Control.Monad.FD.Internal hiding (Term, fromInt, label, max, min)
@@ -162,17 +170,33 @@ data Bounds s =
          }
 
 bounds :: IntMap (Var s) Factor -> Addend -> Divisor -> Bounds s
-bounds xs c a =
-  (`div'` a) *** (`div` a) <<<
-  whenA (a < 0) swap $
-  IntMap.foldrWithKey f (pair $ fromIntegral $ negate c) xs
-  where
-    f x v | v >= 0 =
-      (+ (-v) * Internal.max x) *** (+ (-v) * Internal.min x)
-    f x (-1) =
-      (+ Internal.min x) *** (+ Internal.max x)
-    f x v =
-      (+ (-v) * Internal.min x) *** (+ (-v) * Internal.max x)
+bounds xs b0 a =
+  IntMap.foldrWithKey
+  (\ k v b -> b - v * varBounds k)
+  (fromIntegral $ negate b0) xs / a
+
+varBounds :: Var s -> Bounds s
+varBounds x = Bounds (Internal.min x) (Internal.max x)
+
+instance Additive (Bounds s) where
+  Bounds min max + Bounds min' max' = Bounds (min + min') (max + max')
+  Bounds min max - Bounds min' max' = Bounds (min - max') (max - min')
+  fromInteger i = Bounds x x
+    where
+      x = fromInteger i
+
+instance Multiplicative Int (Bounds s) (Bounds s) where
+  x * Bounds {..}
+    | x >= 0 = Bounds (x * minTerm) (x * maxTerm)
+    | otherwise = Bounds (x * maxTerm) (x * minTerm)
+
+instance Multiplicative (Bounds s) Int (Bounds s) where
+  (*) = flip (*)
+
+instance Fractional (Bounds s) Int where
+  Bounds {..} / x
+    | x >= 0 = Bounds (minTerm `div'` x) (maxTerm `div` x)
+    | otherwise = Bounds (maxTerm `div'` x) (minTerm `div` x)
 
 label :: Term s -> FDT s m Int
 label (Term x y) =
@@ -187,18 +211,3 @@ label' xs = do
 
 fromIntegral :: (Prelude.Integral a, Additive b) => a -> b
 fromIntegral = fromInteger . Prelude.toInteger
-
-(***) :: (Internal.Term s -> Internal.Term s) ->
-        (Internal.Term s -> Internal.Term s) ->
-        Bounds s -> Bounds s
-(f *** g) ~Bounds {..} = Bounds (f minTerm) (g maxTerm)
-
-whenA :: Category cat => Bool -> cat a a -> cat a a
-whenA True f = f
-whenA False _ = id
-
-swap :: Bounds s -> Bounds s
-swap Bounds {..} = Bounds maxTerm minTerm
-
-pair :: Internal.Term s -> Bounds s
-pair a = Bounds a a
