@@ -15,6 +15,8 @@ module Control.Monad.FD
        , fromVar
        , fromInt
        , Additive (..)
+       , subtract
+       , fromIntegral
        , Multiplicative (..)
        , Fractional (..)
        , (#=)
@@ -170,10 +172,9 @@ data Bounds s =
          }
 
 bounds :: IntMap (Var s) Factor -> Addend -> Divisor -> Bounds s
-bounds xs b0 a =
-  IntMap.foldrWithKey
-  (\ k v b -> b - v * varBounds k)
-  (fromIntegral $ negate b0) xs / a
+bounds xs b0 a = IntMap.foldrWithKey (\ k v b -> b - v * varBounds k) b0' xs / a
+  where
+    b0' = fromIntegral $ negate b0
 
 varBounds :: Var s -> Bounds s
 varBounds x = Bounds (Internal.min x) (Internal.max x)
@@ -208,6 +209,3 @@ label' :: Traversable t => t (Term s) -> FDT s m (t Int)
 label' xs = do
   label_' $ foldMap (\ (Term xs' _) -> IntMap.keys xs') xs
   mapM label xs
-
-fromIntegral :: (Prelude.Integral a, Additive b) => a -> b
-fromIntegral = fromInteger . Prelude.toInteger

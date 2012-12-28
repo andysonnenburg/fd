@@ -19,6 +19,7 @@ module Control.Monad.FD.Internal
        , runFDT
        , Additive (..)
        , subtract
+       , fromIntegral
        , Multiplicative (..)
        , Integral (..)
        , Fractional (..)
@@ -63,6 +64,7 @@ import Data.Tuple (swap)
 import Prelude hiding (Fractional (..),
                        Integral (..),
                        Num (..),
+                       fromIntegral,
                        fst,
                        mapM_,
                        max,
@@ -137,6 +139,9 @@ class Additive a where
 
 subtract :: Additive a => a -> a -> a
 subtract = flip (-)
+
+fromIntegral :: (Prelude.Integral a, Additive b) => a -> b
+fromIntegral = fromInteger . Prelude.toInteger
 
 class Multiplicative a b c | a b -> c, a c -> b, b c -> a where
   (*) :: a -> b -> c

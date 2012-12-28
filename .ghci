@@ -1,1 +1,4 @@
 :set -isrc -idist/build/autogen -optP-include -optPdist/build/autogen/cabal_macros.h -fobject-code
+:load src/Control/Monad/FD.hs
+:set -XRebindableSyntax
+import Prelude hiding (Num (..))
