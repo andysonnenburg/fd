@@ -114,10 +114,13 @@ deleteLT' x dom = case dom of
   Bounds min max
     | x > min -> fromBounds x max
     | otherwise -> dom
-  IntSet set -> case IntSet.splitMember x set of
-    (_, mem, gt)
-      | mem -> fromIntSet $ IntSet.insert x gt
-      | otherwise -> fromIntSet gt
+  IntSet set -> fromIntSet $ deleteLT'' x set
+
+deleteLT'' :: Int -> IntSet -> IntSet
+deleteLT'' x set = case IntSet.splitMember x set of
+  (_, mem, gt)
+    | mem -> IntSet.insert x gt
+    | otherwise -> gt
 
 deleteGT' :: Int -> Dom -> Dom
 deleteGT' x dom = case dom of
@@ -125,17 +128,21 @@ deleteGT' x dom = case dom of
   Bounds min max
     | x < max -> fromBounds min x
     | otherwise -> dom
-  IntSet set -> case IntSet.splitMember x set of
-    (lt, mem, _)
-      | mem -> fromIntSet $ IntSet.insert x lt
-      | otherwise -> fromIntSet lt
+  IntSet set -> fromIntSet $ deleteGT'' x set
+
+deleteGT'' :: Int -> IntSet -> IntSet
+deleteGT'' x set = case IntSet.splitMember x set of
+  (lt, mem, _)
+    | mem -> IntSet.insert x lt
+    | otherwise -> lt
 
 delete :: Dom -> Dom -> Maybe (Dom, Pruning)
 delete (Bounds min1 max1) dom@(Bounds min2 max2)
   | min1 > min2 && max1 < max2 =
-    prunedFromTo dom $ fromIntSet $
-    IntSet.fromList [min2 .. min1 - 1] <>
-    IntSet.fromList [max1 + 1 .. max2]
+    Just (fromIntSet $
+          IntSet.fromList [min2 .. min1 - 1] <>
+          IntSet.fromList [max1 + 1 .. max2],
+          Pruning.dom)
   | min1 > max2 || max1 < min2 =
     Nothing
   | max1 < max2 =
@@ -173,9 +180,8 @@ retain dom'@(IntSet set1) dom@(Bounds min2 max2)
   | min1 > max2 || max1 < min2 =
     prunedFromTo dom empty
   | otherwise =
-    prunedFromTo dom $ fromIntSet $ IntSet.intersection set1 set2
+    prunedFromTo dom $ fromIntSet $ deleteGT'' max2 $ deleteLT'' min2 set1
   where
-    set2 = IntSet.fromList [Prelude.max min1 min2 .. Prelude.min max1 max2]
     min1 = IntSet.findMin set1
     max1 = IntSet.findMax set1
 retain (IntSet set1) dom@(IntSet set2) =
