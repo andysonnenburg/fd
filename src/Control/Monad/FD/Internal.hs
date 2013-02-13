@@ -37,13 +37,10 @@ module Control.Monad.FD.Internal
        , in'
        , tell
        , label
-       , label_
-       , label_'
        ) where
 
 import Control.Applicative
 import Control.Monad (MonadPlus (mplus, mzero),
-                      (>=>),
                       msum,
                       unless,
                       when)
@@ -51,21 +48,18 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Logic (LogicT, MonadLogic (msplit), observeAllT)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
-import Data.Foldable (forM_, mapM_)
-import Data.List (sort)
+import Data.Foldable (foldMap, forM_, mapM_)
 import Data.Function (on)
 import Data.Functor.Identity
 import Data.Monoid (mempty)
-import Data.Semigroup ((<>))
+import Data.Semigroup (Option (Option), (<>), getOption)
 import Data.Sequence (Seq, (|>))
-import qualified Data.Sequence as Sequence
 import Data.Tuple (swap)
 
 import Prelude hiding (Fractional (..),
                        Integral (..),
                        Num (..),
                        fromIntegral,
-                       fst,
                        mapM_,
                        max,
                        min,
@@ -73,8 +67,6 @@ import Prelude hiding (Fractional (..),
                        subtract)
 import qualified Prelude
 
-import Control.Monad.FD.Internal.Dom (Dom)
-import qualified Control.Monad.FD.Internal.Dom as Dom
 import Control.Monad.FD.Internal.Int
 import Control.Monad.FD.Internal.IntMap.Strict (IntMap, (!))
 import qualified Control.Monad.FD.Internal.IntMap.Strict as IntMap
@@ -84,6 +76,9 @@ import Control.Monad.FD.Internal.Pruning (Pruning, affectedBy)
 import qualified Control.Monad.FD.Internal.Pruning as Pruning
 import Control.Monad.FD.Internal.State (StateT, evalStateT)
 import qualified Control.Monad.FD.Internal.State as State
+
+import Data.IntSet.Dom (Dom)
+import qualified Data.IntSet.Dom as Dom
 
 type FD s = FDT s Identity
 
@@ -111,6 +106,7 @@ instance Alternative (FDT s m) where
 instance Monad (FDT s m) where
   return = FDT . return
   m >>= k = FDT $ unFDT m >>= (unFDT . k)
+  {-# INLINE (>>=) #-}
   fail = FDT . fail
 
 instance MonadPlus (FDT s m) where
@@ -326,52 +322,6 @@ label x = do
       propagatePrunings
       return i
 
-label_ :: Var s -> FDT s m ()
-label_ x = do
-  dom' <- readDomain x
-  case Dom.toList dom' of
-    [] -> empty
-    [_] -> return ()
-    (i:j:is) -> assignTo i <|> assignTo j <|> msum (map assignTo is)
-  where
-    assignTo i = do
-      writeDomain x $ Dom.singleton i
-      pruned x Pruning.val
-      propagatePrunings
-
-label_' :: [Var s] -> FDT s m ()
-label_' =
-  mapM (\ x -> do
-    VarS {..} <- readVar x
-    return $ x :*: (Dom.size domain, Down $ Sequence.length pruningListeners))
-  >=>
-  mapM_ (label_ . fst) . sort
-
-data OnSnd a b = a :*: b
-
-fst :: OnSnd a b -> a
-fst (a :*: _) = a
-
-instance Eq b => Eq (OnSnd a b) where
-  (_ :*: b) == (_ :*: b') = b == b'
-  (_ :*: b) /= (_ :*: b') = b /= b'
-
-instance Ord b => Ord (OnSnd a b) where
-  compare (_ :*: b) (_ :*: b') = b `compare` b'
-  (_ :*: b) < (_ :*: b') = b < b'
-  (_ :*: b) >= (_ :*: b') = b >= b'
-  (_ :*: b) > (_ :*: b') = b > b'
-  (_ :*: b) <= (_ :*: b') = b <= b'
-
-newtype Down a = Down a deriving Eq
-
-instance Ord a => Ord (Down a) where
-  compare (Down x) (Down y) = y `compare` x
-  Down x < Down y = y < x
-  Down x >= Down y = y >= x
-  Down x > Down y = y > x
-  Down x <= Down y = y <= x
-
 type MonotonicityVars s = (MonotoneVars s, AntimonotoneVars s)
 
 getMonotonicityTermVars :: Term s -> FDT s m (MonotonicityVars s)
@@ -418,7 +368,12 @@ getMonotonicityRangeVars r = case r of
     swap <$> getMonotonicityRangeVars r'
 
 isAssigned :: Var s -> FDT s m Bool
-isAssigned = fmap Dom.isVal . readDomain
+isAssigned x = do
+  dom' <- readDomain x
+  return $! case Dom.toList dom' of
+    [] -> True
+    [_] -> True
+    _ -> False
 
 termVars :: Term s -> IntMap (Var s) Pruning
 termVars t = case t of
@@ -442,10 +397,10 @@ retainRange :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 retainRange (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
-  return $! Dom.retain (Dom.fromBounds i1 i2) dom'
+  return $! prunedFromTo dom' $ Dom.deleteLT i1 $ Dom.deleteGT i2 dom'
 retainRange (Dom x) dom' = do
   dom'' <- readDomain x
-  return $! Dom.retain dom'' dom'
+  return $! prunedFromTo dom' $ Dom.intersection dom' dom''
 retainRange (Complement r) dom' =
   deleteRange r dom'
 
@@ -453,10 +408,10 @@ deleteRange :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 deleteRange (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
-  return $! Dom.delete (Dom.fromBounds i1 i2) dom'
+  return $! prunedFromTo dom' $ Dom.deleteBounds i1 i2 dom'
 deleteRange (Dom x) dom' = do
   dom'' <- readDomain x
-  return $! Dom.delete dom'' dom'
+  return $! prunedFromTo dom' $ Dom.difference dom' dom''
 deleteRange (Complement r) dom' =
   retainRange r dom'
 
@@ -651,3 +606,30 @@ bool _ e False = e
 ifThenElse :: Bool -> a -> a -> a
 ifThenElse True t _ = t
 ifThenElse False _ e = e
+
+prunedFromTo :: Dom -> Dom -> Maybe (Dom, Pruning)
+prunedFromTo dom1 dom2 =
+  fmap ((,) dom2) . getOption . foldMap (Option . Just . snd) $ filter fst
+  [ prunedToVal dom1 dom2 --> Pruning.val
+  , min1 < min2 --> Pruning.min
+  , max1 > max2 --> Pruning.max
+  , Dom.size dom1 > Dom.size dom2 --> Pruning.dom
+  ]
+  where
+    (min1, max1) = bounds dom1
+    (min2, max2) = bounds dom2
+
+bounds :: Dom -> (Maybe Int, Maybe Int)
+bounds dom' = (Dom.minView dom', Dom.maxView dom')
+
+infixr 0 -->
+(-->) :: a -> b -> (a, b)
+(-->) = (,)
+
+prunedToVal :: Dom -> Dom -> Bool
+prunedToVal dom1 dom2 = case (Dom.toList dom1, Dom.toList dom2) of
+  ([], []) -> False
+  (_, []) -> True
+  ([_], [_]) -> False
+  (_, [_]) -> True
+  _ -> False

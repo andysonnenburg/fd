@@ -26,12 +26,12 @@ library
     Control.Monad.FD
     Control.Monad.FD.Internal
   other-modules:
-    Control.Monad.FD.Internal.Dom
     Control.Monad.FD.Internal.Int
     Control.Monad.FD.Internal.IntMap.Strict
     Control.Monad.FD.Internal.IntSet
     Control.Monad.FD.Internal.Pruning
     Control.Monad.FD.Internal.State
+    Data.IntSet.Dom
   build-depends:
     base >= 4 && < 5,
     transformers >= 0.2 && < 0.4,
@@ -52,12 +52,12 @@ library
     cpp-options: -DLANGUAGE_Trustworthy
   if impl(ghc >= 7.6)
     other-extensions: EmptyDataDecls, KindSignatures
-    cpp-options: -DLANGUAGE_DataKinds -DLANGUAGE_KindSignatures
+    cpp-options: -DLANGUAGE_DataKinds -DLANGUAGE_KindSignatures -DLANGUAGE_PolyKinds
   if flag(integer-gmp)
     build-depends: integer-gmp
     other-extensions: MagicHash, UnboxedTuples
     cpp-options: -DPACKAGE_integer_gmp
-  ghc-options: -Wall
+  ghc-options: -Wall -O2
 
 benchmark eq10
   default-language: Haskell98

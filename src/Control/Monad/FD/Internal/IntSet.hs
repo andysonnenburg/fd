@@ -24,6 +24,7 @@ delete x = IntSet . IntMap.delete x . unIntSet
 
 insert :: IsInt a => a -> IntSet a -> IntSet a
 insert x = IntSet . IntMap.insert x x . unIntSet
+{-# INLINE insert #-}
 
 member :: IsInt a => a -> IntSet a -> Bool
 member x = IntMap.member x . unIntSet

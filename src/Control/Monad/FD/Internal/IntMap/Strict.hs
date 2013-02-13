@@ -78,6 +78,7 @@ forWithKeyM_ xs f = foldrWithKey (\ k v a -> f k v >> a) (return ()) xs
 
 insert :: IsInt k => k -> v -> IntMap k v -> IntMap k v
 insert k v m = IntMap $ IntMap.insert (toInt k) (k :*: v) (unIntMap m)
+{-# INLINE insert #-}
 
 keys :: IntMap k v -> [k]
 keys = fmap (\ (k :*: _) -> k) . IntMap.elems . unIntMap
