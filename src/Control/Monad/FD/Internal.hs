@@ -106,7 +106,6 @@ instance Alternative (FDT s m) where
 instance Monad (FDT s m) where
   return = FDT . return
   m >>= k = FDT $ unFDT m >>= (unFDT . k)
-  {-# INLINE (>>=) #-}
   fail = FDT . fail
 
 instance MonadPlus (FDT s m) where
@@ -620,7 +619,7 @@ prunedFromTo dom1 dom2 =
     (min2, max2) = bounds dom2
 
 bounds :: Dom -> (Maybe Int, Maybe Int)
-bounds dom' = (Dom.minView dom', Dom.maxView dom')
+bounds dom' = (Dom.lookupMin dom', Dom.lookupMax dom')
 
 infixr 0 -->
 (-->) :: a -> b -> (a, b)

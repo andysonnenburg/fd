@@ -14,7 +14,6 @@
 {-# LANGUAGE
     Rank2Types
   , ScopedTypeVariables
-  , StandaloneDeriving
   , TypeFamilies
   , TypeSynonymInstances #-}
 module Data.IntSet.Dom
@@ -47,8 +46,8 @@ module Data.IntSet.Dom
          -- * Min\/Max
        , findMin
        , findMax
-       , minView
-       , maxView
+       , lookupMin
+       , lookupMax
          -- * Conversion
 
          -- ** List
@@ -84,7 +83,7 @@ import qualified Prelude
 -- | $setup
 -- >>> import Prelude hiding (foldl, foldr, null)
 
-newtype Dom = Dom (Root C C) deriving Show
+newtype Dom = Dom (Root C C)
 
 data Tree t a b where
   Signed ::
@@ -109,8 +108,6 @@ data Tree t a b where
   Empty ::
     Root a b
 
-deriving instance Show (Tree t a b)
-
 type Root = Tree C
 
 type Subtree = Tree O
@@ -126,9 +123,9 @@ type Prefix = Int
 
 type Mask = Int
 
--- instance Show Dom where
---   showsPrec p t =
---     showParen (p > 10) $ showString "fromList " . shows (toList t)
+instance Show Dom where
+  showsPrec p t =
+    showParen (p > 10) $ showString "fromList " . shows (toList t)
 
 instance Eq Dom where
   (==) = (==) `on` toList
@@ -713,8 +710,8 @@ findMax (Dom t) = case t of
     go (Max x) = x
     go (Elem x) = x
 
-minView :: Dom -> Maybe Int
-minView (Dom t) = case t of
+lookupMin :: Dom -> Maybe Int
+lookupMin (Dom t) = case t of
   Signed l _ -> Just $ go l
   Unsigned _ _ l _ -> Just $ go l
   Elem x -> Just $ go (Elem x)
@@ -725,8 +722,8 @@ minView (Dom t) = case t of
     go (Min x) = x
     go (Elem x) = x
 
-maxView :: Dom -> Maybe Int
-maxView (Dom t) = case t of
+lookupMax :: Dom -> Maybe Int
+lookupMax (Dom t) = case t of
   Signed _ r -> Just $ go r
   Unsigned _ _ _ r -> Just $ go r
   Elem x -> Just $ go (Elem x)
