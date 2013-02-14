@@ -56,8 +56,10 @@ module Data.IntSet.Dom
        ) where
 
 import Control.Monad ((<=<))
-#if !(MIN_VERSION_base(4, 6, 0))
+#if defined(MIN_VERSION_base)
+#if !MIN_VERSION_base(4,6,0)
 import Control.Monad.Instances ()
+#endif
 #endif
 
 import Data.Functor ((<$>))
@@ -191,6 +193,10 @@ hasMin t = case t of
   Min _ -> True
   Max _ -> False
   Elem _ -> True
+{-# RULES
+"hasMin->True" forall (t :: Subtree C b) . hasMin t = True
+"hasMin->False" forall (t :: Subtree O b) . hasMin t = False
+ #-}
 
 hasMax :: Subtree a b -> Bool C O b
 hasMax t = case t of
@@ -198,6 +204,10 @@ hasMax t = case t of
   Min _ -> False
   Max _ -> True
   Elem _ -> True
+{-# RULES
+"hasMax->True" forall (t :: Subtree a C) . hasMax t = True
+"hasMax->True" forall (t :: Subtree a O) . hasMax t = False
+ #-}
 
 hasn'tMin :: Subtree a b -> Bool O C a
 hasn'tMin = not . hasMin
@@ -209,7 +219,7 @@ hasn'tMax = not . hasMax
 -- >>> size full == maxBound - minBound + 1
 -- True
 full :: Dom
-full = Dom $ Signed minTree maxTree
+full = fromBounds minBound maxBound
 
 -- |
 -- >>> size empty
@@ -445,15 +455,7 @@ deleteGT x = x `seq` \ (Dom t) -> Dom $ case t of
       Semigroupoid r' -> Signed l r'
       Id -> fromSubtree l
     | otherwise -> toRoot $ unsafeDeleteGT x l
-  Unsigned p m l r
-    | x >= 0 ->
-      if p >= 0
-      then toRoot $ unsafeDeleteGT x (Unsigned p m l r) 
-      else t
-    | otherwise ->
-      if p >= 0
-      then Empty
-      else toRoot $ unsafeDeleteGT x (Unsigned p m l r)
+  Unsigned p m l r -> toRoot $ unsafeDeleteGT x (Unsigned p m l r)
   Elem x' -> toRoot $ unsafeDeleteGT x (Elem x')
   Empty -> Empty
 
@@ -482,6 +484,9 @@ unsafeDeleteGT x = x `seq` go
     go t@(Elem x')
       | x' > x = id
       | otherwise = wrap t
+{-# SPECIALIZE INLINE
+  unsafeDeleteGT :: Int -> Subtree C C -> WithEmpty Subtree C C
+ #-}
 
 -- |
 -- >>> deleteLT (-2) $ fromBounds (-3) (-2)
@@ -493,15 +498,7 @@ deleteLT x = x `seq` \ (Dom t) -> Dom $ case t of
     | otherwise -> case unsafeDeleteLT x l of
       Semigroupoid l' -> Signed l' r
       Id -> fromSubtree r
-  Unsigned p m l r
-    | x >= 0 ->
-      if p >= 0
-      then toRoot $ unsafeDeleteLT x (Unsigned p m l r)
-      else Empty
-    | otherwise ->
-      if p >= 0
-      then t
-      else toRoot $ unsafeDeleteLT x (Unsigned p m l r)
+  Unsigned p m l r -> toRoot $ unsafeDeleteLT x (Unsigned p m l r)
   Elem x' -> toRoot $ unsafeDeleteLT x (Elem x')
   Empty -> Empty
 
@@ -530,6 +527,9 @@ unsafeDeleteLT x = x `seq` go
     go t@(Elem x')
       | x' < x = id
       | otherwise = wrap t
+{-# SPECIALIZE INLINE
+  unsafeDeleteLT :: Int -> Subtree C C -> WithEmpty Subtree C C
+ #-}
 
 -- |
 -- >>> deleteBounds (minBound + 1) (maxBound - 1) $ fromBounds 2 9
@@ -559,14 +559,16 @@ deleteBounds min max
     then deleteGT min'
     else \ (Dom t) -> Dom $ case t of
       Signed l r
-        | m' < 0 -> case unsafeDeleteGT min' l of
-          Semigroupoid l' -> case unsafeDeleteLT max' r of
-            Semigroupoid r' -> Signed l' r'
-            Id -> fromSubtree l'
-          Id -> toRoot $ unsafeDeleteLT max' r
-        | p' < 0 -> case go l of
-          Semigroupoid l' -> Signed l' r
-          Id -> fromSubtree r
+        | min' < 0 ->
+          if max' < 0
+          then case go l of
+            Semigroupoid l' -> Signed l' r
+            Id -> fromSubtree r
+          else case unsafeDeleteGT min' l of
+            Semigroupoid l' -> case unsafeDeleteLT max' r of
+              Semigroupoid r' -> Signed l' r'
+              Id -> fromSubtree l'
+            Id -> toRoot $ unsafeDeleteLT max' r
         | otherwise -> case go r of
           Semigroupoid r' -> Signed l r'
           Id -> Empty
@@ -574,20 +576,25 @@ deleteBounds min max
       Elem x -> toRoot $ go (Elem x)
       Empty -> Empty
   where
-    m' = mkMask min' max'
-    p' = mkPrefix min' m'
     min' = min - 1
     max' = max + 1
     go :: Subtree a b -> WithEmpty Subtree a b
     go t@(Unsigned p m l r)
-      | toWord m' >= toWord m || mkPrefix p' m /= p =
+      | toWord m' >= toWord m =
         unsafeDeleteGT min' t >>> unsafeDeleteLT max' t
+      | mkPrefix p' m /= p =
+        if p' < p
+        then wrap $ ifThenElse (hasMin l) t ((Max min' >>> Min min') >>> t)
+        else wrap $ ifThenElse (hasMax r) t (t >>> (Max min' >>> Min max'))
       | zero p' m = case go l of
         Semigroupoid l' -> wrap $ Unsigned p m l' r
         Id -> wrap r
       | otherwise = case go r of
         Semigroupoid r' -> wrap $ Unsigned p m l r'
         Id -> wrap l
+      where
+        m' = mkMask min' max'
+        p' = mkPrefix min' m'
     go t@(Min x)
       | x < min' = wrap $ unsafeInsertMin x (Max min' >>> Min max')
       | x == min' = wrap $ Elem x >>> Min max'
@@ -601,6 +608,7 @@ deleteBounds min max
     go t@(Elem x)
       | x > min' && x < max' = id
       | otherwise = wrap t
+    {-# SPECIALIZE INLINE go :: Subtree C C -> WithEmpty Subtree C C #-}
 
 difference :: Dom -> Dom -> Dom
 difference = undefined
