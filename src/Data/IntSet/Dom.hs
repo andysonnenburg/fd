@@ -56,6 +56,9 @@ module Data.IntSet.Dom
        ) where
 
 import Control.Monad ((<=<))
+#if !(MIN_VERSION_base(4, 6, 0))
+import Control.Monad.Instances ()
+#endif
 
 import Data.Functor ((<$>))
 import Data.Bits
