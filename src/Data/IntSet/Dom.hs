@@ -194,8 +194,8 @@ hasMin t = case t of
   Max _ -> False
   Elem _ -> True
 {-# RULES
-"hasMin->True" forall (t :: Subtree C b) . hasMin t = True
-"hasMin->False" forall (t :: Subtree O b) . hasMin t = False
+"hasMin->True" forall (t :: Subtree C b) . hasMin t = t `seq` True
+"hasMin->False" forall (t :: Subtree O b) . hasMin t = t `seq` False
  #-}
 
 hasMax :: Subtree a b -> Bool C O b
@@ -205,8 +205,8 @@ hasMax t = case t of
   Max _ -> True
   Elem _ -> True
 {-# RULES
-"hasMax->True" forall (t :: Subtree a C) . hasMax t = True
-"hasMax->True" forall (t :: Subtree a O) . hasMax t = False
+"hasMax->True" forall (t :: Subtree a C) . hasMax t = t `seq` True
+"hasMax->True" forall (t :: Subtree a O) . hasMax t = t `seq` False
  #-}
 
 hasn'tMin :: Subtree a b -> Bool O C a
@@ -759,6 +759,7 @@ fromSubtree t = case t of
   Min min -> Min min
   Max max -> Max max
   Elem x -> Elem x
+{-# INLINE fromSubtree #-}
 
 combine :: Subtree a a -> Subtree a a -> Root a a
 combine t1 t2
