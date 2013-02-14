@@ -56,7 +56,6 @@ module Data.IntSet.Dom
        ) where
 
 import Control.Monad ((<=<))
-import Control.Monad.Instances ()
 
 import Data.Functor ((<$>))
 import Data.Bits
