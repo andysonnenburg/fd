@@ -206,7 +206,7 @@ hasMax t = case t of
   Elem _ -> True
 {-# RULES
 "hasMax->True" forall (t :: Subtree a C) . hasMax t = t `seq` True
-"hasMax->True" forall (t :: Subtree a O) . hasMax t = t `seq` False
+"hasMax->False" forall (t :: Subtree a O) . hasMax t = t `seq` False
  #-}
 
 hasn'tMin :: Subtree a b -> Bool O C a
