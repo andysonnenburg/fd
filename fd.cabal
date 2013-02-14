@@ -59,6 +59,14 @@ library
     cpp-options: -DPACKAGE_integer_gmp
   ghc-options: -Wall -O2
 
+test-suite doctests
+  default-language: Haskell98
+  type: exitcode-stdio-1.0
+  hs-source-dirs: tests
+  main-is: doctests.hs
+  build-depends: base, doctest >= 0.8
+  ghc-options: -Wall -threaded
+
 benchmark eq10
   default-language: Haskell98
   type: exitcode-stdio-1.0
