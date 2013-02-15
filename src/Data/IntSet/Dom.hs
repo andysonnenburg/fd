@@ -88,7 +88,7 @@ import qualified Prelude
 -- | $setup
 -- >>> import Prelude hiding (foldl, foldr, null)
 
-newtype Dom = Dom (Root C C)
+newtype Dom = Dom { unDom :: Root C C }
 
 data Tree t a b where
   Signed ::
@@ -164,28 +164,26 @@ size = foldlWithBounds' (\ a _ -> a + 1) (\ a min max -> a + max - min + 1) 0
 -- >>> member 1 (fromList [5, 3])
 -- False
 member :: Int -> Dom -> Prelude.Bool
-member x = x `seq` \ (Dom t) -> case t of
+member = (. unDom) . member'
+
+member' :: Int -> Tree t a b -> Prelude.Bool
+member' x t = x `seq` case t of
   Signed l r
-    | x < 0 -> go l
-    | otherwise -> go r
+    | x < 0 -> member' x l
+    | otherwise -> member' x r
   Unsigned p m l r
-    | mkPrefix x m /= p -> Prelude.False
-    | zero x m -> go l
-    | otherwise -> go r
+    | mkPrefix x m /= p ->
+      if x < p then toBool $ hasn'tMin l else toBool $ hasn'tMax r
+    | zero x m ->
+      member' x l
+    | otherwise ->
+      member' x r
+  Min min -> x >= min
+  Max max -> x <= max
   Elem x' -> x == x'
   Empty -> Prelude.False
-  where
-    go :: Subtree a b -> Prelude.Bool
-    go (Unsigned p m l r)
-      | mkPrefix x m /= p =
-        if x < p then toBool $ hasn'tMin l else toBool $ hasn'tMax r
-      | zero x m =
-        go l
-      | otherwise =
-        go r
-    go (Min min) = x >= min
-    go (Max max) = x <= max
-    go (Elem x') = x == x'
+{-# SPECIALIZE INLINE member' :: Int -> Root C C -> Prelude.Bool #-}
+{-# SPECIALIZE INLINE member' :: Int -> Subtree a b -> Prelude.Bool #-}
 
 hasMin :: Subtree a b -> Bool C O a
 hasMin t = case t of
@@ -193,9 +191,10 @@ hasMin t = case t of
   Min _ -> True
   Max _ -> False
   Elem _ -> True
+{-# NOINLINE[0] hasMin #-}
 {-# RULES
-"hasMin->True" forall (t :: Subtree C b) . hasMin t = t `seq` True
-"hasMin->False" forall (t :: Subtree O b) . hasMin t = t `seq` False
+"hasMin->True"[~0] forall (t :: Subtree C b) . hasMin t = t `seq` True
+"hasMin->False"[~0] forall (t :: Subtree O b) . hasMin t = t `seq` False
  #-}
 
 hasMax :: Subtree a b -> Bool C O b
@@ -204,9 +203,10 @@ hasMax t = case t of
   Min _ -> False
   Max _ -> True
   Elem _ -> True
+{-# NOINLINE[0] hasMax #-}
 {-# RULES
-"hasMax->True" forall (t :: Subtree a C) . hasMax t = t `seq` True
-"hasMax->False" forall (t :: Subtree a O) . hasMax t = t `seq` False
+"hasMax->True"[~0] forall (t :: Subtree a C) . hasMax t = t `seq` True
+"hasMax->False"[~0] forall (t :: Subtree a O) . hasMax t = t `seq` False
  #-}
 
 hasn'tMin :: Subtree a b -> Bool O C a
@@ -460,33 +460,27 @@ deleteGT x = x `seq` \ (Dom t) -> Dom $ case t of
   Empty -> Empty
 
 unsafeDeleteGT :: Int -> Subtree a b -> WithEmpty Subtree a C
-unsafeDeleteGT x = x `seq` go
-  where
-    go :: Subtree a b -> WithEmpty Subtree a C
-    go t@(Unsigned p m l r)
-      | mkPrefix x m /= p =
-        if x < p
-        then ifThenElse (hasMin l) id (wrap $ Max x)
-        else ifThenElse (hasMax r) (wrap t) (wrap $ t >>> Max x)
-      | zero x m =
-        go l
-      | otherwise =
-        case go r of
-          Semigroupoid r' -> wrap $ Unsigned p m l r'
-          Id -> wrap l
-    go t@(Min min)
-      | min > x = id
-      | min == x = wrap $ Elem x
-      | otherwise = wrap $ t >>> Max x
-    go t@(Max max)
-      | max > x = wrap $ Max x
-      | otherwise = wrap t
-    go t@(Elem x')
-      | x' > x = id
-      | otherwise = wrap t
-{-# SPECIALIZE INLINE
-  unsafeDeleteGT :: Int -> Subtree C C -> WithEmpty Subtree C C
- #-}
+unsafeDeleteGT x t = x `seq` case t of
+  Unsigned p m l r
+    | mkPrefix x m /= p ->
+      if x < p
+      then ifThenElse (hasMin l) id (wrap $ Max x)
+      else ifThenElse (hasMax r) (wrap t) (wrap $ t >>> Max x)
+    | zero x m -> unsafeDeleteGT x l
+    | otherwise -> case unsafeDeleteGT x r of
+      Semigroupoid r' -> wrap $ Unsigned p m l r'
+      Id -> wrap l
+  Min min
+    | min > x -> id
+    | min == x -> wrap $ Elem x
+    | otherwise -> wrap $ t >>> Max x
+  Max max
+    | max > x -> wrap $ Max x
+    | otherwise -> wrap t
+  Elem x'
+    | x' > x -> id
+    | otherwise -> wrap t
+{-# SPECIALIZE INLINE unsafeDeleteGT :: Int -> Subtree C C -> WithEmpty Subtree C C #-}
 
 -- |
 -- >>> deleteLT (-2) $ fromBounds (-3) (-2)
@@ -503,33 +497,27 @@ deleteLT x = x `seq` \ (Dom t) -> Dom $ case t of
   Empty -> Empty
 
 unsafeDeleteLT :: Int -> Subtree a b -> WithEmpty Subtree C b
-unsafeDeleteLT x = x `seq` go
-  where
-    go :: Subtree a b -> WithEmpty Subtree C b
-    go t@(Unsigned p m l r)
-      | mkPrefix x m /= p =
-        if x < p
-        then ifThenElse (hasMin l) (wrap t) (wrap $ Min x >>> t)
-        else ifThenElse (hasMax r) id (wrap $ Min x)
-      | zero x m =
-        case go l of
-          Semigroupoid l' -> wrap $ Unsigned p m l' r
-          Id -> wrap r
-      | otherwise =
-        go r
-    go t@(Min min)
-      | min < x = wrap $ Min x
-      | otherwise = wrap t
-    go t@(Max max)
-      | max < x = id
-      | max == x = wrap $ Elem x
-      | otherwise = wrap $ Min x >>> t
-    go t@(Elem x')
-      | x' < x = id
-      | otherwise = wrap t
-{-# SPECIALIZE INLINE
-  unsafeDeleteLT :: Int -> Subtree C C -> WithEmpty Subtree C C
- #-}
+unsafeDeleteLT x t = x `seq` case t of
+  Unsigned p m l r
+    | mkPrefix x m /= p ->
+      if x < p
+      then ifThenElse (hasMin l) (wrap t) (wrap $ Min x >>> t)
+      else ifThenElse (hasMax r) id (wrap $ Min x)
+    | zero x m -> case unsafeDeleteLT x l of
+      Semigroupoid l' -> wrap $ Unsigned p m l' r
+      Id -> wrap r
+    | otherwise -> unsafeDeleteLT x r
+  Min min
+    | min < x -> wrap $ Min x
+    | otherwise -> wrap t
+  Max max
+    | max < x -> id
+    | max == x -> wrap $ Elem x
+    | otherwise -> wrap $ Min x >>> t
+  Elem x'
+    | x' < x -> id
+    | otherwise -> wrap t
+{-# SPECIALIZE INLINE unsafeDeleteLT :: Int -> Subtree C C -> WithEmpty Subtree C C #-}
 
 -- |
 -- >>> deleteBounds (minBound + 1) (maxBound - 1) $ fromBounds 2 9
@@ -698,52 +686,56 @@ foldrFB = foldrWithBounds
 #endif
 
 findMin :: Dom -> Int
-findMin (Dom t) = case t of
-  Signed l _ -> go l
-  Unsigned _ _ l _ -> go l
-  Elem x -> go (Elem x)
+findMin = findMin' . unDom
+
+findMin' :: Tree t C b -> Int
+findMin' t = case t of
+  Signed l _ -> findMin' l
+  Unsigned _ _ l _ -> findMin' l
+  Min x -> x
+  Elem x -> x
   Empty -> error "findMin: empty domain has no minimal element"
-  where
-    go :: Subtree C b -> Int
-    go (Unsigned _ _ l _) = go l
-    go (Min x) = x
-    go (Elem x) = x
+{-# SPECIALIZE INLINE findMin' :: Root C C -> Int #-}
+{-# SPECIALIZE INLINE findMin' :: Subtree C b -> Int #-}
 
 findMax :: Dom -> Int
-findMax (Dom t) = case t of
-  Signed _ r -> go r
-  Unsigned _ _ _ r -> go r
-  Elem x -> go (Elem x)
-  Empty -> error "findMin: empty domain has no maximal element"
-  where
-    go :: Subtree a C -> Int
-    go (Unsigned _ _ _ r) = go r
-    go (Max x) = x
-    go (Elem x) = x
+findMax = findMax' . unDom
+
+findMax' :: Tree t a C -> Int
+findMax' t = case t of
+  Signed _ r -> findMax' r
+  Unsigned _ _ _ r -> findMax' r
+  Max x -> x
+  Elem x -> x
+  Empty -> error "findMax: empty domain has no maximal element"
+{-# SPECIALIZE INLINE findMax' :: Root C C -> Int #-}
+{-# SPECIALIZE INLINE findMax' :: Subtree a C -> Int #-}
 
 lookupMin :: Dom -> Maybe Int
-lookupMin (Dom t) = case t of
-  Signed l _ -> Just $ go l
-  Unsigned _ _ l _ -> Just $ go l
-  Elem x -> Just $ go (Elem x)
+lookupMin = lookupMin' . unDom
+
+lookupMin' :: Tree t C b -> Maybe Int
+lookupMin' t = case t of
+  Signed l _ -> lookupMin' l
+  Unsigned _ _ l _ -> lookupMin' l
+  Min x -> Just x
+  Elem x -> Just x
   Empty -> Nothing
-  where
-    go :: Subtree C b -> Int
-    go (Unsigned _ _ l _) = go l
-    go (Min x) = x
-    go (Elem x) = x
+{-# SPECIALIZE INLINE lookupMin' :: Root C C -> Maybe Int #-}
+{-# SPECIALIZE INLINE lookupMin' :: Subtree C b -> Maybe Int #-}
 
 lookupMax :: Dom -> Maybe Int
-lookupMax (Dom t) = case t of
-  Signed _ r -> Just $ go r
-  Unsigned _ _ _ r -> Just $ go r
-  Elem x -> Just $ go (Elem x)
+lookupMax = lookupMax' . unDom
+
+lookupMax' :: Tree t a C -> Maybe Int
+lookupMax' t = case t of
+  Signed _ r -> lookupMax' r
+  Unsigned _ _ _ r -> lookupMax' r
+  Max x -> Just x
+  Elem x -> Just x
   Empty -> Nothing
-  where
-    go :: Subtree a C -> Int
-    go (Unsigned _ _ _ r) = go r
-    go (Max x) = x
-    go (Elem x) = x
+{-# SPECIALIZE INLINE lookupMax' :: Root C C -> Maybe Int #-}
+{-# SPECIALIZE INLINE lookupMax' :: Subtree a C -> Maybe Int #-}
 
 -- |
 -- >>> fromList [] == empty
@@ -867,16 +859,13 @@ ifThenElse :: Bool a b c -> (c ~ a => d) -> (c ~ b => d) -> d
 ifThenElse x t f = case x of
   True -> t
   False -> f
+{-# INLINE ifThenElse #-}
 
 not :: Bool a b c -> Bool b a c
-not x = case x of
-  True -> False
-  False -> True
+not x = ifThenElse x False True
 
 toBool :: Bool a b c -> Prelude.Bool
-toBool x = case x of
-  True -> Prelude.True
-  False -> Prelude.False
+toBool x = ifThenElse x Prelude.True Prelude.False
 
 infixr 9 .
 infixr 1 >>>
