@@ -48,11 +48,11 @@ import Control.Monad.IO.Class (MonadIO (liftIO))
 import Control.Monad.Logic (LogicT, MonadLogic (msplit), observeAllT)
 import Control.Monad.Trans.Class (MonadTrans (lift))
 
-import Data.Foldable (foldMap, forM_, mapM_)
+import Data.Foldable (forM_, mapM_)
 import Data.Function (on)
 import Data.Functor.Identity
 import Data.Monoid (mempty)
-import Data.Semigroup (Option (Option), (<>), getOption)
+import Data.Semigroup ((<>))
 import Data.Sequence (Seq, (|>))
 import Data.Tuple (swap)
 
@@ -607,23 +607,15 @@ ifThenElse True t _ = t
 ifThenElse False _ e = e
 
 prunedFromTo :: Dom -> Dom -> Maybe (Dom, Pruning)
-prunedFromTo dom1 dom2 =
-  fmap ((,) dom2) . getOption . foldMap (Option . Just . snd) $ filter fst
-  [ prunedToVal dom1 dom2 --> Pruning.val
-  , min1 < min2 --> Pruning.min
-  , max1 > max2 --> Pruning.max
-  , Dom.size dom1 > Dom.size dom2 --> Pruning.dom
-  ]
-  where
-    (min1, max1) = bounds dom1
-    (min2, max2) = bounds dom2
-
-bounds :: Dom -> (Maybe Int, Maybe Int)
-bounds dom' = (Dom.lookupMin dom', Dom.lookupMax dom')
-
-infixr 0 -->
-(-->) :: a -> b -> (a, b)
-(-->) = (,)
+prunedFromTo dom1 dom2
+  | prunedToVal dom1 dom2 = Just (dom2, Pruning.val)
+  | Dom.lookupMin dom1 < Dom.lookupMin dom2 =
+    Just (dom2, if Dom.lookupMax dom1 > Dom.lookupMax dom2
+                then Pruning.min <> Pruning.max
+                else Pruning.min)
+  | Dom.lookupMax dom1 > Dom.lookupMax dom2 = Just (dom2, Pruning.max)
+  | Dom.size dom1 > Dom.size dom2 = Just (dom2, Pruning.dom)
+  | otherwise = Nothing
 
 prunedToVal :: Dom -> Dom -> Bool
 prunedToVal dom1 dom2 = case (Dom.toList dom1, Dom.toList dom2) of

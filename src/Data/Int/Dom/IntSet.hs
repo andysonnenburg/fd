@@ -159,7 +159,6 @@ size (Dom t) = case t of
     go (Min min) = negate min
     go (Max max) = max + 1
     go (Elem _) = 1
-  
 
 -- |
 -- >>> member 5 (fromList [5, 3])
