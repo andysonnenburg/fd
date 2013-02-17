@@ -77,8 +77,8 @@ import qualified Control.Monad.FD.Internal.Pruning as Pruning
 import Control.Monad.FD.Internal.State (StateT, evalStateT)
 import qualified Control.Monad.FD.Internal.State as State
 
-import Data.IntSet.Dom (Dom)
-import qualified Data.IntSet.Dom as Dom
+import Data.Int.Dom.IntSet (Dom)
+import qualified Data.Int.Dom.IntSet as Dom
 
 type FD s = FDT s Identity
 
@@ -407,7 +407,7 @@ deleteRange :: Range s -> Dom -> FDT s m (Maybe (Dom, Pruning))
 deleteRange (t1 :.. t2) dom' = do
   i1 <- getVal t1
   i2 <- getVal t2
-  return $! prunedFromTo dom' $ Dom.deleteBounds i1 i2 dom'
+  return $! prunedFromTo dom' $ Dom.deleteFromTo i1 i2 dom'
 deleteRange (Dom x) dom' = do
   dom'' <- readDomain x
   return $! prunedFromTo dom' $ Dom.difference dom' dom''

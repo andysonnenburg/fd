@@ -1,8 +1,6 @@
 {-# LANGUAGE CPP #-}
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_PolyKinds)
 {-# LANGUAGE DataKinds #-}
-#else
-{-# LANGUAGE EmptyDataDecls #-}
 #endif
 {-# LANGUAGE
     FlexibleInstances
@@ -16,7 +14,7 @@
   , ScopedTypeVariables
   , TypeFamilies
   , TypeSynonymInstances #-}
-module Data.IntSet.Dom
+module Data.Int.Dom.IntSet
        ( -- * the Dom type
          Dom
          -- * Query
@@ -29,13 +27,14 @@ module Data.IntSet.Dom
        , singleton
        , singletonGE
        , singletonLE
-       , fromBounds
+       , fromTo
        , insert
        , insertGE
        , insertLE
+       , delete
        , deleteGT
        , deleteLT
-       , deleteBounds
+       , deleteFromTo
          -- * Combine
        , difference
        , intersection
@@ -55,18 +54,14 @@ module Data.IntSet.Dom
        , fromList
        ) where
 
-import Control.Monad ((<=<))
 #if defined(MIN_VERSION_base)
 #if !MIN_VERSION_base(4,6,0)
 import Control.Monad.Instances ()
 #endif
 #endif
 
-import Data.Functor ((<$>))
-import Data.Bits
 import Data.Function (on)
 import qualified Data.List as List
-import Data.Word (Word)
 
 #ifdef __GLASGOW_HASKELL__
 import GHC.Exts (build)
@@ -77,13 +72,13 @@ import Prelude hiding (Bool (..),
                        foldl,
                        foldr,
                        id,
-                       init,
-                       last,
                        max,
                        min,
                        not,
                        null)
 import qualified Prelude
+
+import Data.Int.Dom.Common
 
 -- | $setup
 -- >>> import Prelude hiding (foldl, foldr, null)
@@ -118,15 +113,12 @@ type Root = Tree C
 type Subtree = Tree O
 
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_PolyKinds)
-data S = C | O
+type O = Prelude.False
+type C = Prelude.True
 #else
-data C
 data O
+data C
 #endif
-
-type Prefix = Int
-
-type Mask = Int
 
 instance Show Dom where
   showsPrec p t =
@@ -156,7 +148,18 @@ null (Dom t) = case t of
 -- >>> size (singleton 1)
 -- 1
 size :: Dom -> Int
-size = foldlWithBounds' (\ a _ -> a + 1) (\ a min max -> a + max - min + 1) 0
+size (Dom t) = case t of
+  Signed l r -> go l + go r
+  Unsigned _ _ l r -> go l + go r
+  Elem _ -> 1
+  Empty -> 0
+  where
+    go :: Subtree a b -> Int
+    go (Unsigned _ _ l r) = go l + go r
+    go (Min min) = negate min
+    go (Max max) = max + 1
+    go (Elem _) = 1
+  
 
 -- |
 -- >>> member 5 (fromList [5, 3])
@@ -174,10 +177,8 @@ member' x t = x `seq` case t of
   Unsigned p m l r
     | mkPrefix x m /= p ->
       if x < p then toBool $ hasn'tMin l else toBool $ hasn'tMax r
-    | zero x m ->
-      member' x l
-    | otherwise ->
-      member' x r
+    | zero x m -> member' x l
+    | otherwise -> member' x r
   Min min -> x >= min
   Max max -> x <= max
   Elem x' -> x == x'
@@ -219,7 +220,7 @@ hasn'tMax = not . hasMax
 -- >>> size full == maxBound - minBound + 1
 -- True
 full :: Dom
-full = fromBounds minBound maxBound
+full = fromTo minBound maxBound
 
 -- |
 -- >>> size empty
@@ -238,14 +239,26 @@ singleton = Dom . Elem
 singletonGE :: Int -> Dom
 singletonGE = Dom . singletonGE'
 
+singletonGE' :: Int -> Root C C
+singletonGE' x = append (Min x) maxTree
+
+unsafeSingletonGE :: Int -> Tree t C C
+unsafeSingletonGE x = unsafeAppend (Min x) maxTree
+
 singletonLE :: Int -> Dom
 singletonLE = Dom . singletonLE'
 
-fromBounds :: Int -> Int -> Dom
-fromBounds = (Dom .) . fromBounds'
+singletonLE' :: Int -> Root C C
+singletonLE' x = append minTree (Max x)
 
-fromBounds' :: Int -> Int -> Root C C
-fromBounds' min max
+unsafeSingletonLE :: Int -> Tree t C C
+unsafeSingletonLE x = unsafeAppend minTree (Max x)
+
+fromTo :: Int -> Int -> Dom
+fromTo = (Dom .) . fromTo'
+
+fromTo' :: Int -> Int -> Root C C
+fromTo' min max
   | min < max = append (Min min) (Max max)
   | min == max = Elem min
   | otherwise = Empty
@@ -296,13 +309,13 @@ insert x = x `seq` \ (Dom t) -> Dom $ case t of
         p = mkPrefix x m
 
 -- |
--- >>> member 4 $ insertGE 2 $ fromBounds 1 3
+-- >>> member 4 $ insertGE 2 $ fromTo 1 3
 -- True
--- >>> member 0 $ insertGE 2 $ fromBounds 1 3
+-- >>> member 0 $ insertGE 2 $ fromTo 1 3
 -- False
--- >>> size (insertGE 7 $ fromBounds 5 10) == maxBound - 5 + 1
+-- >>> size (insertGE 7 $ fromTo 5 10) == maxBound - 5 + 1
 -- True
--- >>> member (maxBound - 2) $ insertGE (maxBound - 1) $ fromBounds (-1) 1
+-- >>> member (maxBound - 2) $ insertGE (maxBound - 1) $ fromTo (-1) 1
 -- False
 -- >>> member (maxBound - 2) $ insertGE (maxBound - 1) $ singleton 1
 -- False
@@ -344,12 +357,10 @@ unsafeInsertGE x = x `seq` go
         if x < p
         then ifThenElse (hasMin l) (wrap $ Min x) id
         else wrap $ ifThenElse (hasMax r) (t >>> Min x) t
-      | zero x m =
-        go l
-      | otherwise =
-        case go r of
-          Semigroupoid r' -> wrap $ Unsigned p m l r'
-          Id -> wrap l
+      | zero x m = go l
+      | otherwise = wrap $ case go r of
+        Semigroupoid r' -> Unsigned p m l r'
+        Id -> l
     go t@(Min min)
       | min <= x = wrap t
       | otherwise = wrap $ Min x
@@ -360,21 +371,15 @@ unsafeInsertGE x = x `seq` go
       | x' >= x = wrap $ Min x
       | otherwise = wrap $ t >>> Min x
 
-singletonGE' :: Int -> Root C C
-singletonGE' x = append (Min x) maxTree
-
-unsafeSingletonGE :: Int -> Tree t C C
-unsafeSingletonGE x = unsafeAppend (Min x) maxTree
-
 maxTree :: Tree t O C
 maxTree = Max maxBound
 
 -- |
--- >>> member 4 $ insertLE 2 $ fromBounds 1 3
+-- >>> member 4 $ insertLE 2 $ fromTo 1 3
 -- False
--- >>> member 0 $ insertLE 2 $ fromBounds 1 3
+-- >>> member 0 $ insertLE 2 $ fromTo 1 3
 -- True
--- >>> member (minBound + 2) $ insertLE (minBound + 1) $ fromBounds (-1) 2
+-- >>> member (minBound + 2) $ insertLE (minBound + 1) $ fromTo (-1) 2
 -- False
 -- >>> member (minBound + 2) $ insertLE (minBound + 1) $ singleton (-1)
 -- False
@@ -417,9 +422,9 @@ unsafeInsertLE x = x `seq` go
         then wrap $ ifThenElse (hasMin l) (Max x >>> t) t
         else ifThenElse (hasMax r) (wrap $ Max x) id
       | zero x m =
-        case go l of
-          Semigroupoid l' -> wrap $ Unsigned p m l' r
-          Id -> wrap r
+        wrap $ case go l of
+          Semigroupoid l' -> Unsigned p m l' r
+          Id -> r
       | otherwise =
         go r
     go t@(Min min)
@@ -432,17 +437,11 @@ unsafeInsertLE x = x `seq` go
       | x' <= x = wrap $ Max x
       | otherwise = wrap $ Max x >>> t
 
-singletonLE' :: Int -> Root C C
-singletonLE' x = append minTree (Max x)
-
-unsafeSingletonLE :: Int -> Tree t C C
-unsafeSingletonLE x = unsafeAppend minTree (Max x)
-
 minTree :: Tree t C O
 minTree = Min minBound
 
 -- |
--- >>> deleteGT 4 $ insert 4 $ fromBounds (-2) 3
+-- >>> deleteGT 4 $ insert 4 $ fromTo (-2) 3
 -- fromList [-2,-1,0,1,2,3,4]
 -- >>> deleteGT 4 $ singleton 4
 -- fromList [4]
@@ -483,7 +482,7 @@ unsafeDeleteGT x t = x `seq` case t of
 {-# SPECIALIZE INLINE unsafeDeleteGT :: Int -> Subtree C C -> WithEmpty Subtree C C #-}
 
 -- |
--- >>> deleteLT (-2) $ fromBounds (-3) (-2)
+-- >>> deleteLT (-2) $ fromTo (-3) (-2)
 -- fromList [-2]
 deleteLT :: Int -> Dom -> Dom
 deleteLT x = x `seq` \ (Dom t) -> Dom $ case t of
@@ -503,9 +502,9 @@ unsafeDeleteLT x t = x `seq` case t of
       if x < p
       then ifThenElse (hasMin l) (wrap t) (wrap $ Min x >>> t)
       else ifThenElse (hasMax r) id (wrap $ Min x)
-    | zero x m -> case unsafeDeleteLT x l of
-      Semigroupoid l' -> wrap $ Unsigned p m l' r
-      Id -> wrap r
+    | zero x m -> wrap $ case unsafeDeleteLT x l of
+      Semigroupoid l' -> Unsigned p m l' r
+      Id -> r
     | otherwise -> unsafeDeleteLT x r
   Min min
     | min < x -> wrap $ Min x
@@ -519,87 +518,94 @@ unsafeDeleteLT x t = x `seq` case t of
     | otherwise -> wrap t
 {-# SPECIALIZE INLINE unsafeDeleteLT :: Int -> Subtree C C -> WithEmpty Subtree C C #-}
 
+delete :: Int -> Dom -> Dom
+delete x = deleteFromTo x x
+
 -- |
--- >>> deleteBounds (minBound + 1) (maxBound - 1) $ fromBounds 2 9
+-- >>> deleteFromTo (minBound + 1) (maxBound - 1) $ fromTo 2 9
 -- fromList []
--- >>> deleteBounds 8 8 $ fromBounds 1 9
+-- >>> deleteFromTo 8 8 $ fromTo 1 9
 -- fromList [1,2,3,4,5,6,7,9]
--- >>> deleteBounds 1 9 $ fromBounds 1 9
+-- >>> deleteFromTo 1 9 $ fromTo 1 9
 -- fromList []
--- >>> deleteBounds 4 9 $ fromBounds 1 9
+-- >>> deleteFromTo 4 9 $ fromTo 1 9
 -- fromList [1,2,3]
--- >>> deleteBounds 2 9 $ fromBounds 1 9
+-- >>> deleteFromTo 2 9 $ fromTo 1 9
 -- fromList [1]
--- >>> deleteBounds 9 8 $ fromBounds 1 9
+-- >>> deleteFromTo 9 8 $ fromTo 1 9
 -- fromList [1,2,3,4,5,6,7,8,9]
--- >>> deleteBounds 1 9 $ fromBounds 1 9
+-- >>> deleteFromTo 1 9 $ fromTo 1 9
 -- fromList []
-deleteBounds :: Int -> Int -> Dom -> Dom
-deleteBounds min max
-  | max < min =
-    id
+deleteFromTo :: Int -> Int -> Dom -> Dom
+deleteFromTo min max
+  | max < min = id
   | min == minBound =
     if max == maxBound
     then const empty
-    else deleteLT max'
+    else deleteLT (max + 1)
   | otherwise =
     if max == maxBound
-    then deleteGT min'
-    else \ (Dom t) -> Dom $ case t of
-      Signed l r
-        | min' < 0 ->
-          if max' < 0
-          then case go l of
-            Semigroupoid l' -> Signed l' r
-            Id -> fromSubtree r
-          else case unsafeDeleteGT min' l of
-            Semigroupoid l' -> case unsafeDeleteLT max' r of
-              Semigroupoid r' -> Signed l' r'
-              Id -> fromSubtree l'
-            Id -> toRoot $ unsafeDeleteLT max' r
-        | otherwise -> case go r of
-          Semigroupoid r' -> Signed l r'
-          Id -> Empty
-      Unsigned p m l r -> toRoot $ go (Unsigned p m l r)
-      Elem x -> toRoot $ go (Elem x)
-      Empty -> Empty
+    then deleteGT (min - 1)
+    else deleteFromToExclusive (min - 1) (max + 1)
+
+deleteFromToExclusive :: Int -> Int -> Dom -> Dom
+deleteFromToExclusive min max = \ (Dom t) -> Dom $ case t of
+  Signed l r
+    | min < 0 ->
+      if max < 0
+      then case go l of
+        Semigroupoid l' -> Signed l' r
+        Id -> fromSubtree r
+      else case unsafeDeleteGT min l of
+        Semigroupoid l' -> case unsafeDeleteLT max r of
+          Semigroupoid r' -> Signed l' r'
+          Id -> fromSubtree l'
+        Id -> toRoot $ unsafeDeleteLT max r
+    | otherwise -> case go r of
+      Semigroupoid r' -> Signed l r'
+      Id -> Empty
+  Unsigned p m l r -> toRoot $ go (Unsigned p m l r)
+  Elem x -> toRoot $ go (Elem x)
+  Empty -> Empty
   where
-    min' = min - 1
-    max' = max + 1
     go :: Subtree a b -> WithEmpty Subtree a b
     go t@(Unsigned p m l r)
-      | toWord m' >= toWord m =
-        unsafeDeleteGT min' t >>> unsafeDeleteLT max' t
+      | depth m' <= depth m =
+        unsafeDeleteGT min t >>> unsafeDeleteLT max t
       | mkPrefix p' m /= p =
         if p' < p
-        then wrap $ ifThenElse (hasMin l) t ((Max min' >>> Min min') >>> t)
-        else wrap $ ifThenElse (hasMax r) t (t >>> (Max min' >>> Min max'))
-      | zero p' m = case go l of
-        Semigroupoid l' -> wrap $ Unsigned p m l' r
-        Id -> wrap r
-      | otherwise = case go r of
-        Semigroupoid r' -> wrap $ Unsigned p m l r'
-        Id -> wrap l
-      where
-        m' = mkMask min' max'
-        p' = mkPrefix min' m'
+        then wrap $ ifThenElse (hasMin l) t ((Max min >>> Min min) >>> t)
+        else wrap $ ifThenElse (hasMax r) t (t >>> (Max min >>> Min max))
+      | zero p' m = wrap $ case go l of
+        Semigroupoid l' -> Unsigned p m l' r
+        Id -> r
+      | otherwise = wrap $ case go r of
+        Semigroupoid r' -> Unsigned p m l r'
+        Id -> l
     go t@(Min x)
-      | x < min' = wrap $ unsafeInsertMin x (Max min' >>> Min max')
-      | x == min' = wrap $ Elem x >>> Min max'
-      | x >= max' = wrap t
-      | otherwise = wrap $ Min max'
+      | x < min = wrap $ unsafeInsertMin x (Max min >>> Min max)
+      | x == min = wrap $ Elem x >>> Min max
+      | x >= max = wrap t
+      | otherwise = wrap $ Min max
     go t@(Max x)
-      | x <= min' = wrap t
-      | x > max' = wrap $ unsafeInsertMax x (Max min' >>> Min max')
-      | x == max' = wrap $ Max min' >>> Elem x
-      | otherwise = wrap $ Max min'
+      | x <= min = wrap t
+      | x > max = wrap $ unsafeInsertMax x (Max min >>> Min max)
+      | x == max = wrap $ Max min >>> Elem x
+      | otherwise = wrap $ Max min
     go t@(Elem x)
-      | x > min' && x < max' = id
+      | x > min && x < max = id
       | otherwise = wrap t
     {-# SPECIALIZE INLINE go :: Subtree C C -> WithEmpty Subtree C C #-}
+    m' = mkMask min max
+    p' = mkPrefix min m'
+
+toRoot :: WithEmpty Subtree a b -> Root a b
+toRoot w = case w of
+  Semigroupoid t -> fromSubtree t
+  Id -> Empty
 
 difference :: Dom -> Dom -> Dom
-difference = undefined
+difference = foldlWithBounds' (flip delete) (\ t min max -> deleteFromTo min max t)
 
 intersection :: Dom -> Dom -> Dom
 intersection = undefined
@@ -617,7 +623,7 @@ foldrWithBounds f g b = \ (Dom t) -> case t of
   Elem x -> f x b
   Empty -> b
   where
-    go :: Subtree e x -> IfC x b (Pair b) -> IfC e b (Pair b)
+    go :: Subtree e x -> If x b (Pair b) -> If e b (Pair b)
     go (Unsigned _ _ l r) b' = go l (go r b')
     go (Min min) (max :*: b') = g min max b'
     go (Max max) b' = max :*: b'
@@ -637,7 +643,7 @@ foldlWithBounds f g a = \ (Dom t) -> case t of
   Elem x -> f a x
   Empty -> a
   where
-    go :: Subtree e x -> IfC e a (Pair a) -> IfC x a (Pair a)
+    go :: Subtree e x -> If e a (Pair a) -> If x a (Pair a)
     go (Unsigned _ _ l r) a' = go r (go l a')
     go (Min min) a' = min :*: a'
     go (Max max) (min :*: a') = g a' min max
@@ -657,7 +663,7 @@ foldlWithBounds' f g a = \ (Dom t) -> case t of
   Elem x -> a `seq` f a x
   Empty -> a
   where
-    go :: Subtree e x -> IfC e a (StrictPair a) -> IfC x a (StrictPair a)
+    go :: Subtree e x -> If e a (StrictPair a) -> If x a (StrictPair a)
     go (Unsigned _ _ l r) a' = go r (go l a')
     go (Min min) a' = min :*! a'
     go (Max max) (min :*! a') = g a' min max
@@ -755,7 +761,7 @@ fromSubtree t = case t of
 
 combine :: Subtree a a -> Subtree a a -> Root a a
 combine t1 t2
-  | m < 0 = if p1 < 0 then Signed t1 t2 else Signed t2 t1
+  | negative m = if p1 < 0 then Signed t1 t2 else Signed t2 t1
   | zero p1 m = Unsigned p m t1 t2
   | otherwise = Unsigned p m t2 t1
   where
@@ -807,49 +813,21 @@ getPrefix (Elem x) = x
 
 mkRoot :: Prefix -> Mask -> Subtree a b -> Subtree b c -> Root a c
 mkRoot p m
-  | m < 0 = Signed
+  | negative m = Signed
   | otherwise = Unsigned p m
 {-# INLINE mkRoot #-}
-
-zero :: Int -> Mask -> Prelude.Bool
-zero i m = toWord i .&. toWord m == 0
-{-# INLINE zero #-}
-
-mkMask :: Prefix -> Prefix -> Mask
-mkMask =
-  curry $ last . next 32 . next 16 . next 8 . next 4 . next 2 . next 1 . init
-  where
-    init = uncurry (xor `on` toWord)
-    next = (.|.) <=< flip (.>>.)
-    last = fromWord <$> (xor =<< (.>>. 1))
-    (.>>.) = shiftR
-{-# INLINE mkMask #-}
-
-mkPrefix :: Int -> Mask -> Prefix
-mkPrefix i m = fromWord $ toWord i .&. (complement (m' - 1) `xor` m')
-  where
-    m' = toWord m
-{-# INLINE mkPrefix #-}
-
-toWord :: Int -> Word
-toWord = fromIntegral
-{-# INLINE toWord #-}
-
-fromWord :: Word -> Int
-fromWord = fromIntegral
-{-# INLINE fromWord #-}
 
 data Pair a = {-# UNPACK #-} !Int :*: a
 
 data StrictPair a = {-# UNPACK #-} !Int :*! !a
 
 #if defined(LANGUAGE_DataKinds) && defined(LANGUAGE_PolyKinds)
-type family IfC (s :: S) a b
+type family If (a :: Prelude.Bool) b c
 #else
-type family IfC s a b
+type family If a b c
 #endif
-type instance IfC C a b = a
-type instance IfC O a b = b
+type instance If O a b = b
+type instance If C a b = a
 
 data Bool a b c where
   True :: Bool a b a
@@ -912,11 +890,6 @@ instance Unwrap O C C where unwrap (Semigroupoid f) = f
 instance Unwrap C O O where unwrap (Semigroupoid f) = f
 instance Unwrap O C O where unwrap (Semigroupoid f) = f
 instance Unwrap O O C where unwrap (Semigroupoid f) = f
-
-toRoot :: WithEmpty Subtree a b -> Root a b
-toRoot w = case w of
-  Semigroupoid t -> fromSubtree t
-  Id -> Empty
 
 instance Semigroupoid Subtree where
   (.) = flip unsafeAppend

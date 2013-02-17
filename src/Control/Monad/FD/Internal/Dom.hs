@@ -12,7 +12,7 @@ module Control.Monad.FD.Internal.Dom
        , size
        , deleteGT
        , deleteLT
-       , deleteBounds
+       , deleteFromTo
        , difference
        , intersection
        , toList
@@ -111,8 +111,8 @@ deleteGT' x set = case IntSet.splitMember x set of
     | mem -> IntSet.insert x lt
     | otherwise -> lt
 
-deleteBounds :: Int -> Int -> Dom -> Dom
-deleteBounds min1 max1 dom@(Bounds min2 max2)
+deleteFromTo :: Int -> Int -> Dom -> Dom
+deleteFromTo min1 max1 dom@(Bounds min2 max2)
   | min1 > min2 && max1 < max2 =
     fromIntSet $
     IntSet.fromList [min2 .. min1 - 1] <>
@@ -125,11 +125,11 @@ deleteBounds min1 max1 dom@(Bounds min2 max2)
     fromBounds min2 (min1 - 1)
   | otherwise =
     empty
-deleteBounds min max (IntSet set) =
+deleteFromTo min max (IntSet set) =
   case IntSet.split min set of
     (lt, gt) -> case IntSet.split max gt of
       (_, gt') -> fromIntSet $ lt <> gt'
-deleteBounds _ _ Empty =
+deleteFromTo _ _ Empty =
   empty
 
 difference :: Dom -> Dom -> Dom
