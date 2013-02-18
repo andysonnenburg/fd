@@ -288,10 +288,8 @@ insert x = x `seq` \ (Dom t) -> Dom $ case t of
         if x < p
         then ifThenElse (hasMin l) (Elem x >>> t) t
         else ifThenElse (hasMax r) (t >>> Elem x) t
-      | zero x m =
-        Unsigned p m (go l) r
-      | otherwise =
-        Unsigned p m l (go r)
+      | zero x m = Unsigned p m (go l) r
+      | otherwise = Unsigned p m l (go r)
     go t@(Min min)
       | x >= min = t
       | otherwise = Elem x >>> t
@@ -419,12 +417,10 @@ unsafeInsertLE x = x `seq` go
         if x < p
         then wrap $ ifThenElse (hasMin l) (Max x >>> t) t
         else ifThenElse (hasMax r) (wrap $ Max x) id
-      | zero x m =
-        wrap $ case go l of
-          Semigroupoid l' -> Unsigned p m l' r
-          Id -> r
-      | otherwise =
-        go r
+      | zero x m = wrap $ case go l of
+        Semigroupoid l' -> Unsigned p m l' r
+        Id -> r
+      | otherwise = go r
     go t@(Min min)
       | min <= x = id
       | otherwise = wrap $ Max x >>> t
