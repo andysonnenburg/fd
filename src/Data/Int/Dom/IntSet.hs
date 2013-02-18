@@ -664,27 +664,6 @@ foldlWithBounds' f g a = \ (Dom t) -> case t of
     go (Elem x) a' = a' `seq` f a' x
 {-# INLINE foldlWithBounds' #-}
 
--- |
--- >>> toList (fromList [5, 3])
--- [3,5]
-toList :: Dom -> [Int]
-toList = foldr (:) []
-
-#if __GLASGOW_HASKELL__
-foldrFB :: (Int -> b -> b) -> (Int -> Int -> b -> b) -> b -> Dom -> b
-foldrFB = foldrWithBounds
-{-# INLINE[0] foldrFB #-}
-{-# NOINLINE[0] toList #-}
-{-# RULES
-"Dom.toList->build" [~1]
-  forall t . toList t = build (\ c n ->
-    foldrFB (\ x xs -> c x xs) (\ min max xs -> List.foldr c xs [min .. max]) n t)
-"Dom.foldrFB->toList" [1]
-  foldrFB (\ x xs -> x:xs) (\ min max xs -> List.foldr (:) xs [min .. max]) [] =
-    toList
- #-}
-#endif
-
 findMin :: Dom -> Int
 findMin = findMin' . unDom
 
@@ -736,6 +715,27 @@ lookupMax' t = case t of
   Empty -> Nothing
 {-# SPECIALIZE INLINE lookupMax' :: Root C C -> Maybe Int #-}
 {-# SPECIALIZE INLINE lookupMax' :: Subtree a C -> Maybe Int #-}
+
+-- |
+-- >>> toList (fromList [5, 3])
+-- [3,5]
+toList :: Dom -> [Int]
+toList = foldr (:) []
+
+#if __GLASGOW_HASKELL__
+foldrFB :: (Int -> b -> b) -> (Int -> Int -> b -> b) -> b -> Dom -> b
+foldrFB = foldrWithBounds
+{-# INLINE[0] foldrFB #-}
+{-# NOINLINE[0] toList #-}
+{-# RULES
+"Dom.toList->build" [~1]
+  forall t . toList t = build (\ c n ->
+    foldrFB (\ x xs -> c x xs) (\ min max xs -> List.foldr c xs [min .. max]) n t)
+"Dom.foldrFB->toList" [1]
+  foldrFB (\ x xs -> x:xs) (\ min max xs -> List.foldr (:) xs [min .. max]) [] =
+    toList
+ #-}
+#endif
 
 -- |
 -- >>> fromList [] == empty
