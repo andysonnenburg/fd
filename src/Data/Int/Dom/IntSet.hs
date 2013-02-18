@@ -25,9 +25,9 @@ module Data.Int.Dom.IntSet
        , full
        , empty
        , singleton
-       , singletonGE
-       , singletonLE
-       , fromTo
+       , enumFrom
+       , enumTo
+       , enumFromTo
        , insert
        , insertGE
        , insertLE
@@ -69,6 +69,8 @@ import GHC.Exts (build)
 
 import Prelude hiding (Bool (..),
                        (.),
+                       enumFrom,
+                       enumFromTo,
                        foldl,
                        foldr,
                        id,
@@ -79,9 +81,6 @@ import Prelude hiding (Bool (..),
 import qualified Prelude
 
 import Data.Int.Dom.Common
-
--- | $setup
--- >>> import Prelude hiding (foldl, foldr, null)
 
 newtype Dom = Dom { unDom :: Root C C }
 
@@ -219,7 +218,7 @@ hasn'tMax = not . hasMax
 -- >>> size full == maxBound - minBound + 1
 -- True
 full :: Dom
-full = fromTo minBound maxBound
+full = enumFromTo minBound maxBound
 
 -- |
 -- >>> size empty
@@ -235,29 +234,29 @@ singleton :: Int -> Dom
 singleton = Dom . Elem
 {-# INLINE singleton #-}
 
-singletonGE :: Int -> Dom
-singletonGE = Dom . singletonGE'
+enumFrom :: Int -> Dom
+enumFrom = Dom . enumFrom'
 
-singletonGE' :: Int -> Root C C
-singletonGE' x = append (Min x) maxTree
+enumFrom' :: Int -> Root C C
+enumFrom' x = append (Min x) maxTree
 
 unsafeSingletonGE :: Int -> Tree t C C
 unsafeSingletonGE x = unsafeAppend (Min x) maxTree
 
-singletonLE :: Int -> Dom
-singletonLE = Dom . singletonLE'
+enumTo :: Int -> Dom
+enumTo = Dom . enumTo'
 
-singletonLE' :: Int -> Root C C
-singletonLE' x = append minTree (Max x)
+enumTo' :: Int -> Root C C
+enumTo' x = append minTree (Max x)
 
 unsafeSingletonLE :: Int -> Tree t C C
 unsafeSingletonLE x = unsafeAppend minTree (Max x)
 
-fromTo :: Int -> Int -> Dom
-fromTo = (Dom .) . fromTo'
+enumFromTo :: Int -> Int -> Dom
+enumFromTo = (Dom .) . enumFromTo'
 
-fromTo' :: Int -> Int -> Root C C
-fromTo' min max
+enumFromTo' :: Int -> Int -> Root C C
+enumFromTo' min max
   | min < max = append (Min min) (Max max)
   | min == max = Elem min
   | otherwise = Empty
@@ -308,13 +307,13 @@ insert x = x `seq` \ (Dom t) -> Dom $ case t of
         p = mkPrefix x m
 
 -- |
--- >>> member 4 $ insertGE 2 $ fromTo 1 3
+-- >>> member 4 $ insertGE 2 $ enumFromTo 1 3
 -- True
--- >>> member 0 $ insertGE 2 $ fromTo 1 3
+-- >>> member 0 $ insertGE 2 $ enumFromTo 1 3
 -- False
--- >>> size (insertGE 7 $ fromTo 5 10) == maxBound - 5 + 1
+-- >>> size (insertGE 7 $ enumFromTo 5 10) == maxBound - 5 + 1
 -- True
--- >>> member (maxBound - 2) $ insertGE (maxBound - 1) $ fromTo (-1) 1
+-- >>> member (maxBound - 2) $ insertGE (maxBound - 1) $ enumFromTo (-1) 1
 -- False
 -- >>> member (maxBound - 2) $ insertGE (maxBound - 1) $ singleton 1
 -- False
@@ -345,7 +344,7 @@ insertGE x
         if x' < 0
         then Signed (Elem x') (unsafeSingletonGE x)
         else unsafeInsertMax maxBound . unwrap $ unsafeInsertGE x (Elem x')
-    Empty -> singletonGE' x
+    Empty -> enumFrom' x
 
 unsafeInsertGE :: Int -> Subtree a b -> WithFull Subtree a O
 unsafeInsertGE x = x `seq` go
@@ -374,11 +373,11 @@ maxTree :: Tree t O C
 maxTree = Max maxBound
 
 -- |
--- >>> member 4 $ insertLE 2 $ fromTo 1 3
+-- >>> member 4 $ insertLE 2 $ enumFromTo 1 3
 -- False
--- >>> member 0 $ insertLE 2 $ fromTo 1 3
+-- >>> member 0 $ insertLE 2 $ enumFromTo 1 3
 -- True
--- >>> member (minBound + 2) $ insertLE (minBound + 1) $ fromTo (-1) 2
+-- >>> member (minBound + 2) $ insertLE (minBound + 1) $ enumFromTo (-1) 2
 -- False
 -- >>> member (minBound + 2) $ insertLE (minBound + 1) $ singleton (-1)
 -- False
@@ -409,7 +408,7 @@ insertLE x
         if x' >= 0
         then Signed (unsafeSingletonLE x) (Elem x')
         else unsafeInsertMin minBound . unwrap $ unsafeInsertLE x (Elem x')
-    Empty -> singletonLE' x
+    Empty -> enumTo' x
 
 unsafeInsertLE :: Int -> Subtree a b -> WithFull Subtree O b
 unsafeInsertLE x = x `seq` go
@@ -440,7 +439,7 @@ minTree :: Tree t C O
 minTree = Min minBound
 
 -- |
--- >>> deleteGT 4 $ insert 4 $ fromTo (-2) 3
+-- >>> deleteGT 4 $ insert 4 $ enumFromTo (-2) 3
 -- fromList [-2,-1,0,1,2,3,4]
 -- >>> deleteGT 4 $ singleton 4
 -- fromList [4]
@@ -481,7 +480,7 @@ unsafeDeleteGT x t = x `seq` case t of
 {-# SPECIALIZE INLINE unsafeDeleteGT :: Int -> Subtree C C -> WithEmpty Subtree C C #-}
 
 -- |
--- >>> deleteLT (-2) $ fromTo (-3) (-2)
+-- >>> deleteLT (-2) $ enumFromTo (-3) (-2)
 -- fromList [-2]
 deleteLT :: Int -> Dom -> Dom
 deleteLT x = x `seq` \ (Dom t) -> Dom $ case t of
@@ -521,19 +520,19 @@ delete :: Int -> Dom -> Dom
 delete x = deleteFromTo x x
 
 -- |
--- >>> deleteFromTo (minBound + 1) (maxBound - 1) $ fromTo 2 9
+-- >>> deleteFromTo (minBound + 1) (maxBound - 1) $ enumFromTo 2 9
 -- fromList []
--- >>> deleteFromTo 8 8 $ fromTo 1 9
+-- >>> deleteFromTo 8 8 $ enumFromTo 1 9
 -- fromList [1,2,3,4,5,6,7,9]
--- >>> deleteFromTo 1 9 $ fromTo 1 9
+-- >>> deleteFromTo 1 9 $ enumFromTo 1 9
 -- fromList []
--- >>> deleteFromTo 4 9 $ fromTo 1 9
+-- >>> deleteFromTo 4 9 $ enumFromTo 1 9
 -- fromList [1,2,3]
--- >>> deleteFromTo 2 9 $ fromTo 1 9
+-- >>> deleteFromTo 2 9 $ enumFromTo 1 9
 -- fromList [1]
--- >>> deleteFromTo 9 8 $ fromTo 1 9
+-- >>> deleteFromTo 9 8 $ enumFromTo 1 9
 -- fromList [1,2,3,4,5,6,7,8,9]
--- >>> deleteFromTo 1 9 $ fromTo 1 9
+-- >>> deleteFromTo 1 9 $ enumFromTo 1 9
 -- fromList []
 deleteFromTo :: Int -> Int -> Dom -> Dom
 deleteFromTo min max
