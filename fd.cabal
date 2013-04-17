@@ -33,7 +33,6 @@ library
     Control.Monad.FD.Internal.Pruning
     Control.Monad.FD.Internal.State
     Data.Int.Dom.Common
-    Data.Int.Dom.IntMap
     Data.Int.Dom.IntSet
   build-depends:
     base >= 4 && < 5,
